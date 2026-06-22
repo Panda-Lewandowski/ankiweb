@@ -210,9 +210,22 @@ class DeckNotifier:
         st = self.state.status
         st.watching = len(current)
         st.learnable = sum(1 for c in current.values() if learnable(c))
-        for gone in set(self.last_notified) - set(current):
-            del self.last_notified[gone]  # deleted/renamed decks drop silently
-        changes = diff_changes(current, self.last_notified)
+        # Decks that vanished from deck_due_tree() since the last notify. deck_due_tree() prunes
+        # EMPTIED decks (0 cards) the same as deleted/renamed ones, so "gone" means "0 learnable
+        # cards now" in every case. If we last told the receiver a nonzero count, push (0,0,0) to
+        # zero its cached count — otherwise an emptied deck leaves the receiver waking on a
+        # phantom due forever (its new-card interrupter fires on a count fetch can never satisfy).
+        # Decks already acknowledged at (0,0,0) just drop silently.
+        gone = set(self.last_notified) - set(current)
+        gone_changes = [
+            {"deck": name, "deckId": 0, "learnable": False,
+             "new_count": 0, "learn_count": 0, "review_count": 0}
+            for name in gone if self.last_notified[name] != (0, 0, 0)
+        ]
+        for name in gone:
+            if self.last_notified[name] == (0, 0, 0):
+                del self.last_notified[name]  # already zero + gone -> nothing to send
+        changes = diff_changes(current, self.last_notified) + gone_changes
         st.pending = len(changes)
         if not changes:
             return cfg.poll_sec
@@ -224,7 +237,10 @@ class DeckNotifier:
         ok, err = await self._safe_post(cfg, build_payload(changes, self._now()))
         if ok:
             for ch in changes:
-                self.last_notified[ch["deck"]] = counts_sig(ch)
+                if ch["deck"] in gone:
+                    self.last_notified.pop(ch["deck"], None)  # zero-out acked -> forget
+                else:
+                    self.last_notified[ch["deck"]] = counts_sig(ch)
             st.last_success_ts = self._now()
             st.last_error = ""
             st.pending = 0

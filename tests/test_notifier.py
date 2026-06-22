@@ -158,16 +158,41 @@ async def test_tick_flip_then_back_to_acknowledged_nets_no_send(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_tick_deleted_deck_pruned(tmp_path):
+async def test_tick_gone_deck_emits_zero(tmp_path):
+    # A deck vanishing from deck_due_tree() — deck_due_tree() prunes EMPTIED (0-card) decks the
+    # same as deleted/renamed ones, so "gone" means "0 learnable cards now" in every case. We
+    # must push (0,0,0) to zero the receiver's cached count; otherwise an emptied deck leaves the
+    # receiver stuck on a phantom due forever (its new-card interrupter wakes on a count that
+    # fetch can never satisfy). Regression for that stale-count bug.
     snap = {"A": _counts(n=1, did=10)}
     post = FakePost()
     n, _ = _notifier(tmp_path, fetch=lambda: _async(snap), post=post)
     await n._tick(CFG)
     assert n.last_notified == {"A": (1, 0, 0)}
-    snap.clear()                              # deck A removed
+    snap.clear()                              # deck A emptied (pruned) / deleted
     await n._tick(CFG)
-    assert n.last_notified == {}              # pruned silently, no extra POST
-    assert len(post.calls) == 1
+    assert len(post.calls) == 2              # a SECOND POST zeroing A
+    assert post.calls[1]["changes"] == [{"deck": "A", "deckId": 0, "learnable": False,
+                                         "new_count": 0, "learn_count": 0, "review_count": 0}]
+    assert n.last_notified == {}            # A acknowledged at 0 -> forgotten
+    await n._tick(CFG)                       # still gone -> nothing more to send
+    assert len(post.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_tick_gone_deck_already_zero_drops_silently(tmp_path):
+    # A deck that was last notified as (0,0,0) and then vanishes needs no further POST — the
+    # receiver already has it at zero. (It can't actually be in last_notified at (0,0,0) via the
+    # normal path, but the gone-handling must not emit a spurious zero for it.)
+    snap = {"A": _counts(n=1, did=10)}
+    post = FakePost()
+    n, _ = _notifier(tmp_path, fetch=lambda: _async(snap), post=post)
+    await n._tick(CFG)
+    n.last_notified["A"] = (0, 0, 0)         # force the already-zero baseline
+    snap.clear()
+    await n._tick(CFG)
+    assert len(post.calls) == 1              # no extra POST
+    assert n.last_notified == {}             # forgotten
 
 
 @pytest.mark.asyncio
