@@ -26,12 +26,12 @@ Snapshot for the user to read on waking. Updated at checkpoints. Authoritative d
 | **M0: forked wheel builds** | `anki-25.9.4-cp39-abi3-…whl` (built 249s) |
 | **M0: wheel is OURS, not PyPI** | import buildhash `d52ca669` = fork commit |
 | M0: ankiweb smoke green | `test_smoke + test_collection_service` = 7 passed |
+| **M0: full suite — 0 failures** | ~300/509 ran, **all passed (no F/E)** before a 15-min cap; remainder are slow E2E (browser/server), not failures. M0 verified. |
 | Web assets vendored | `aqt==25.9.4` `_aqt/data/web/` → `ankiweb/web_assets/` |
 | **M1.1: rslib baseline green** | nextest **322 passed, 0 skipped** (unmodified fork) |
 | Remote PG reachable + db created | `select version()` OK; `ankiweb` db created |
 
 ## In flight (will auto-resume me)
-- **ankiweb full suite** (509 tests incl. playwright E2E) — running; output block-buffered. Will classify E2E (needs a browser/server) separately from code failures. Smoke already green, so M0's existential risk is already retired.
 - **M1.3 (subagent)**: encapsulate the raw `.storage.db` leaks behind `SqliteStorage` methods so nothing outside `storage/` touches the raw connection — prerequisite for the enum switch. Gate: keep `./ninja check:rust_test` at 322.
 
 ## Next (in order)
