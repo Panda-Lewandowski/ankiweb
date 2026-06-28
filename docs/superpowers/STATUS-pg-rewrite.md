@@ -32,7 +32,7 @@ Snapshot for the user to read on waking. Updated at checkpoints. Authoritative d
 | Remote PG reachable + db created | `select version()` OK; `ankiweb` db created |
 
 ## In flight (will auto-resume me)
-- **M1.3 (subagent)**: encapsulate the raw `.storage.db` leaks behind `SqliteStorage` methods so nothing outside `storage/` touches the raw connection — prerequisite for the enum switch. Gate: keep `./ninja check:rust_test` at 322.
+- **M1.3 + M1.2/M1.4 (subagent)**: a first M1.3 pass encapsulated 33 single-line `.storage.db` leaks (commits `6b2ec12f7`,`c9eba9bdf`,`464509cf3`; 322 green). The enum step's compiler then revealed **17 more `.storage.db` sites my line-based grep missed — they're multi-line `self.storage\n.db…` chains** — plus the `backend/dbproxy.rs` raw-SQL bridge (Python's `col.db` path) and a `LoadBalancer` taking `&SqliteStorage`. Subagent is completing encapsulation **compiler-driven** (moving the dbproxy bridge into `impl SqliteStorage`; no `.db`/`as_sqlite()` escape hatch), then introducing `StorageBackend` enum + switching `Collection.storage`. Gate: `./ninja check:rust_test` = 322.
 
 ## Next (in order)
 1. Close M0 (clean full-suite number; re-run non-E2E if E2E hangs on missing browser).
@@ -45,6 +45,8 @@ Snapshot for the user to read on waking. Updated at checkpoints. Authoritative d
 - **AnkiDroid raw-SQL bridge** (`rslib/src/ankidroid/`): inherently raw-SQLite; ankiweb doesn't use it. Being encapsulated as SQLite-specific in M1.3; candidate to feature-gate off later.
 - **USN/sync storage methods**: don't port to PG — they're removed in M4. Kept Sqlite-only through M1–M3.
 - Build only `wheels:anki` (never `wheels:aqt` → avoids the node/web build).
+- **Leak detection must be compiler-driven, not grep**: a line-based grep misses multi-line `self.storage\n.db…` chains (cost us a false-complete on M1.3's first pass). Switching `Collection.storage` to the enum makes the compiler enumerate *every* residual raw-connection access — that's the reliable gate, used from here on.
+- **`backend/dbproxy.rs`** (`db_query`/`db_query_row`/`db_execute_many`) is the bridge Python's `col.db.all/scalar/execute` uses. Moved into `impl SqliteStorage` in M1; in M2 these are where `PgStorage` must run/translate the SQL against PG (the spec's "11 raw SQL sites" path).
 
 ## Mandate
 User (2026-06-28) is asleep; instructed to proceed fully autonomously, no token/time budget, not stop for decisions until all work is done — they will stop me on waking. All open design choices resolved with the recommended option.
