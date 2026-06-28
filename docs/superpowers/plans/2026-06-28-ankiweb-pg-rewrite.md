@@ -119,20 +119,22 @@ cd /mnt/sda/git/tools/anki-pg-fork && source "$HOME/.cargo/env"
 ```
 - [ ] **Step 2:** Record the baseline (N passed). This is the refactor's safety net. Expected: all green (it's an unmodified release tag).
 
-### Task M1.2: Define the `Storage` trait (object-safe)
+### Task M1.2: Define `StorageBackend` enum dispatch (decided via M1.0 — NOT `dyn`)
 
-- [ ] **Step 1:** From the M1.0 catalog, declare `pub trait Storage` in `rslib/src/storage/traits.rs` with the **exact signatures** of the methods consumers call (copied from `SqliteStorage`'s inherent methods). Keep it **object-safe** (no generic methods returning `Self`; use `&mut self`, concrete arg/return types) so `Collection` can hold `Box<dyn Storage>`.
-- [ ] **Step 2:** `impl Storage for SqliteStorage` by delegating to the existing inherent methods (mechanical; bodies unchanged).
-- [ ] **Step 3:** `./ninja check:rust` → still green (trait added, not yet consumed). **Commit.**
+The M1.0 catalog found ~12 non-object-safe methods (generic closures like `for_each_card_in_search<F: FnMut>`, plus `<T: FromSql>`/`<I: ToSql>` sync methods), so `Box<dyn Storage>` is **out**. Use a concrete enum (generic/closure methods are fine on a concrete type; static dispatch = no runtime cost).
+
+- [ ] **Step 1:** Add `pub enum StorageBackend { Sqlite(SqliteStorage), Pg(PgStorage) }` in `rslib/src/storage/mod.rs`. Until M2 the `Pg` variant is omitted (added in M2). Generate one delegating method per surface method (`match self { Self::Sqlite(s) => s.method(args), … }`) via a `macro_rules!` over the catalog's §2 method list.
+- [ ] **Step 2:** USN/sync methods (catalog `*`) are NOT delegated to `Pg` — they're removed in M4; keep them Sqlite-only.
+- [ ] **Step 3:** `./ninja check:rust` → still green (enum added, not yet consumed). **Commit.**
 
 ### Task M1.3: Encapsulate the 22 raw `storage.db` accesses
 
 - [ ] For each of the 22 sites (from M1.0): add a named method to the `Storage` trait + `SqliteStorage` impl that performs that exact query, and replace the raw `storage.db.…` call with the trait method. Group commits by subsystem. Green gate (`./ninja check:rust`) after each group. **Commit per group.**
 
-### Task M1.4: Switch `Collection.storage` to `Box<dyn Storage>`
+### Task M1.4: Switch `Collection.storage` to `StorageBackend`
 
-- [ ] **Step 1:** Change the `storage` field type on `Collection` (`rslib/src/collection/mod.rs`) from `SqliteStorage` to `Box<dyn Storage>` (or an enum `StorageBackend` if `dyn` proves awkward for a few non-object-safe spots — prefer `dyn`, fall back to enum dispatch only where required, documenting why).
-- [ ] **Step 2:** Fix the resulting type errors across the **585 `.storage.` call sites** mechanically (they now go through the trait). Work module-group by module-group; `./ninja check:rust` green after each; **commit per group**.
+- [ ] **Step 1:** Change the `storage` field type on `Collection` (`rslib/src/collection/mod.rs`) from `SqliteStorage` to `StorageBackend`, wrapping the opened storage in `StorageBackend::Sqlite(...)`.
+- [ ] **Step 2:** Fix the resulting type errors across the **526 `.storage.` call sites** mechanically (they resolve to the enum's same-signature delegating methods, so most sites compile unchanged). Work module-group by module-group; `./ninja check:rust` green after each; **commit per group**.
 - [ ] **Step 3:** Full rslib suite green.
 
 ### Task M1.5: Rebuild wheel, re-verify ankiweb (no behavior change)
