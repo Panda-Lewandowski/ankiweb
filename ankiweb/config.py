@@ -41,6 +41,17 @@ class Settings:
     # Optional web-UI password. Empty = no gate (open, the default). When set, the web app
     # requires a /login session cookie; the AnkiConnect server keeps its own apiKey.
     password: str = ""
+    # PostgreSQL collection store. Empty = SQLite (unchanged default). When set, the
+    # collection opens on PostgreSQL via Collection(path, pg_dsn=...) — `collection_path`
+    # is then used ONLY to derive the media folder (no .anki2 file is written). The DSN is
+    # the base connection string (e.g. postgresql://user:pass@host:port/db); a
+    # `?options=-csearch_path=<pg_schema>,public` is appended at connect time so the
+    # collection's tables live in `pg_schema` while the pgrx extension functions in
+    # `public` stay resolvable.
+    pg_dsn: str = ""
+    # Schema that holds this collection's tables (single-collection deployment → one fixed
+    # schema). Provisioned with CREATE SCHEMA IF NOT EXISTS before the first open.
+    pg_schema: str = "ankiweb"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -55,4 +66,6 @@ class Settings:
             source_url=os.environ.get("ANKIWEB_SOURCE_URL", ""),
             lang=os.environ.get("ANKIWEB_LANG", ""),
             password=os.environ.get("ANKIWEB_PASSWORD", ""),
+            pg_dsn=os.environ.get("ANKIWEB_PG_DSN", ""),
+            pg_schema=os.environ.get("ANKIWEB_PG_SCHEMA", "ankiweb"),
         )

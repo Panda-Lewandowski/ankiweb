@@ -1,7 +1,9 @@
 from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Callable, TypeVar
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import anki.lang
 from anki.collection import Collection
 from ankiweb.config import Settings
@@ -17,6 +19,49 @@ def op_changes_to_flags(changes) -> dict:
         for f in changes.DESCRIPTOR.fields
         if f.type == FieldDescriptor.TYPE_BOOL
     }
+
+
+def _pg_connect_dsn(base_dsn: str, schema: str) -> str:
+    """Return the base PostgreSQL DSN with an `options=-csearch_path=<schema>,public` query
+    param appended (URL-encoded) so the collection's tables resolve in `<schema>` while the
+    pgrx extension functions (installed in `public`) stay reachable. The trailing `,public`
+    is REQUIRED. If the DSN already carries an `options` param it is left untouched."""
+    parts = urlsplit(base_dsn)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if not any(k == "options" for k, _ in query):
+        query.append(("options", f"-csearch_path={schema},public"))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _provision_pg(base_dsn: str, schema: str, col_path) -> None:
+    """Prepare PostgreSQL + the filesystem for a PG-backed open:
+      1. CREATE SCHEMA IF NOT EXISTS <schema> on an admin connection (the base DSN, no
+         search_path override) — the connect-only open path requires the namespace to
+         pre-exist; PostgreSQL never auto-creates a search_path schema.
+      2. Ensure the media folder exists — media stays on the filesystem in PG mode, and
+         MediaManager skips auto-creating the folder when server=True.
+    psycopg is imported lazily so SQLite mode needs no PostgreSQL driver installed."""
+    import psycopg
+    from psycopg import sql
+    with psycopg.connect(base_dsn, autocommit=True) as conn:
+        conn.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
+    from anki.media import media_paths_from_col_path
+    media_dir, _media_db = media_paths_from_col_path(str(col_path))
+    Path(media_dir).mkdir(parents=True, exist_ok=True)
+
+
+def build_collection(settings: Settings) -> Collection:
+    """Open (bootstrapping on first use) the Collection. SQLite by default; PostgreSQL when
+    `settings.pg_dsn` is set. In PG mode the filesystem `collection_path` is used ONLY to
+    derive the media folder (no `.anki2` file is written) — the collection store lives in
+    PostgreSQL under `settings.pg_schema`. Always runs on the serialized worker thread."""
+    anki.lang.set_lang(settings.lang or "en")
+    path = settings.collection_path
+    if not settings.pg_dsn:
+        return Collection(str(path), server=False)
+    _provision_pg(settings.pg_dsn, settings.pg_schema, path)
+    connect_dsn = _pg_connect_dsn(settings.pg_dsn, settings.pg_schema)
+    return Collection(str(path), server=False, pg_dsn=connect_dsn)
 
 
 class CollectionService:
@@ -43,8 +88,7 @@ class CollectionService:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         def _open() -> Collection:
-            anki.lang.set_lang(self._settings.lang or "en")
-            return Collection(str(path), server=False)
+            return build_collection(self._settings)
 
         loop = asyncio.get_running_loop()
         self._col = await loop.run_in_executor(self._executor, _open)
@@ -52,15 +96,14 @@ class CollectionService:
     async def reopen(self) -> None:
         """Re-open the collection on the worker WITHOUT shutting it down — for ops
         that close it (export_collection_package). Unlike close(), keeps the executor."""
-        path = self._settings.collection_path
 
         def _reopen() -> Collection:
-            # Re-apply the language for self-consistency with open(): a fresh Collection
-            # otherwise inherits the process-global, which a second service with a different
-            # lang could have changed. Defensive — the single-service topology makes the
-            # global sufficient today.
-            anki.lang.set_lang(self._settings.lang or "en")
-            return Collection(str(path), server=False)
+            # build_collection re-applies the language for self-consistency with open(): a
+            # fresh Collection otherwise inherits the process-global, which a second service
+            # with a different lang could have changed. Defensive — the single-service
+            # topology makes the global sufficient today. In PG mode this re-opens the same
+            # schema (connect-only; no re-bootstrap).
+            return build_collection(self._settings)
 
         loop = asyncio.get_event_loop()
         async with self._lock:
