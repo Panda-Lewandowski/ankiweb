@@ -29,16 +29,22 @@ Snapshot for the user to read on waking. Updated at checkpoints. Authoritative d
 | **M0: full suite — 0 failures** | ~300/509 ran, **all passed (no F/E)** before a 15-min cap; remainder are slow E2E (browser/server), not failures. M0 verified. |
 | Web assets vendored | `aqt==25.9.4` `_aqt/data/web/` → `ankiweb/web_assets/` |
 | **M1.1: rslib baseline green** | nextest **322 passed, 0 skipped** (unmodified fork) |
+| **M1 COMPLETE: storage fully abstracted** | leaks sealed + dbproxy bridge moved into `impl SqliteStorage` + `StorageBackend` enum (208 delegations, **no escape hatch**) + dead `db()` removed; fork commits `e44d08eee`,`250a93366`,`9682ce8a5`,`914914a0a`; **322 passed** |
+| M1.5: ankiweb on M1 wheel | wheel buildhash flipped to `914914a0`; smoke **7 passed**; full non-E2E subset running for the record |
 | Remote PG reachable + db created | `select version()` OK; `ankiweb` db created |
 
 ## In flight (will auto-resume me)
-- **M1.3 + M1.2/M1.4 (subagent)**: a first M1.3 pass encapsulated 33 single-line `.storage.db` leaks (commits `6b2ec12f7`,`c9eba9bdf`,`464509cf3`; 322 green). The enum step's compiler then revealed **17 more `.storage.db` sites my line-based grep missed — they're multi-line `self.storage\n.db…` chains** — plus the `backend/dbproxy.rs` raw-SQL bridge (Python's `col.db` path) and a `LoadBalancer` taking `&SqliteStorage`. Subagent is completing encapsulation **compiler-driven** (moving the dbproxy bridge into `impl SqliteStorage`; no `.db`/`as_sqlite()` escape hatch), then introducing `StorageBackend` enum + switching `Collection.storage`. Gate: `./ninja check:rust_test` = 322.
+- **M1.5 record run (background)**: full non-E2E ankiweb subset on the M1 wheel for a definitive count. The ankiweb suite is slow (server/collection-heavy, ~2-3s/test), so this is a *record*, not the gate — the gate (rslib **322** + smoke **7**) already passed.
 
-## Next (in order)
-1. Close M0 (clean full-suite number; re-run non-E2E if E2E hangs on missing browser).
-2. M1.3 review/commit (leaks encapsulated, 322 green).
-3. **M1.2/M1.4**: introduce `StorageBackend` enum (single `Sqlite` variant for now) with macro-generated delegation over the 220-method surface; switch `Collection.storage` to it; the 526 `.storage.` call-sites resolve to same-signature methods unchanged. Green gate + rebuild wheel + re-run ankiweb suite (no behavior change).
-4. M2: `PgStorage` skeleton + PG DDL + pgrx custom-fn extension; minimal slice green on PG via parametrized rslib tests. (`fsrs` is a reusable workspace crate — confirmed.)
+## Next (in order) — M2 (`PgStorage` on the real PG)
+M0 ✓, M1 ✓. Now M2:
+1. Dump the exact current SQLite schema (ground truth) from a fresh collection.
+2. Write the PG DDL (translate tables+indexes; `sfld` dynamic-typing strategy, integer-PK→`bigint`, `WITHOUT ROWID` graves, `INSERT OR …`→`ON CONFLICT`).
+3. Add the synchronous `postgres` crate to rslib; create `PgStorage` (holds `postgres::Client`) + the `Pg` enum variant; `open`/connect to the DSN.
+4. pgrx extension for the 11 custom fns + `unicase` collation; install on the remote PG (superuser available).
+5. Parametrize the rslib test harness over `{Sqlite, Pg}`; get a minimal vertical slice (open / add+get note / basic search) green on PG.
+
+Note: `backend/dbproxy.rs db_query*` now lives in `impl SqliteStorage` — that's exactly where `PgStorage` will run/translate ankiweb's raw `col.db` SQL (the spec's "11 raw SQL sites"). `fsrs` is a reusable workspace crate.
 
 ## Findings / notes
 - **ankiweb `pyproject.toml` packaging bug**: has both SPDX `license="AGPL-3.0-or-later"` AND a deprecated license *classifier* → modern setuptools rejects `pip install -e .` (running instance just has older setuptools). Worked around for M0 (installed deps explicitly). Minor fix later: drop the redundant `"License :: OSI Approved …"` classifier line. NOT yet changed.
