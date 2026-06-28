@@ -44,7 +44,17 @@ def _provision_pg(base_dsn: str, schema: str, col_path) -> None:
     import psycopg
     from psycopg import sql
     with psycopg.connect(base_dsn, autocommit=True) as conn:
-        conn.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
+        try:
+            conn.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
+        except (psycopg.errors.UniqueViolation, psycopg.errors.DuplicateSchema):
+            # `CREATE SCHEMA IF NOT EXISTS` is NOT atomic against a concurrent
+            # creator: when several ankiweb worker processes start at once on a
+            # fresh schema, two can pass the existence check and one then hits a
+            # unique-violation on pg_namespace (or duplicate_schema). The schema
+            # exists either way — which is the whole post-condition — so the loser
+            # treats the race as success. (The actual collection bootstrap inside
+            # is made race-safe separately by the PG backend's advisory lock.)
+            pass
     from anki.media import media_paths_from_col_path
     media_dir, _media_db = media_paths_from_col_path(str(col_path))
     Path(media_dir).mkdir(parents=True, exist_ok=True)
