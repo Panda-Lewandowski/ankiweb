@@ -134,7 +134,19 @@ class CollectionService:
             if col is None:
                 raise RuntimeError("collection not open")
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(self._executor, lambda: fn(col))
+            pg = bool(self._settings.pg_dsn)
+
+            def _call():
+                # De-chattification (M4-6 poll throttle): in PG mode, mark a new
+                # operation boundary so the cross-process cache-staleness poll
+                # (meta_epoch SELECT) runs at most ONCE for this whole operation
+                # instead of once per backend call — AnkiConnect actions loop many
+                # backend calls per item. No-op in SQLite mode.
+                if pg:
+                    col._backend.arm_cache_poll()
+                return fn(col)
+
+            return await loop.run_in_executor(self._executor, _call)
 
     async def run_op(self, fn: Callable[[Collection], T], initiator: str | None = None) -> T:
         """Run a mutating op (fn returns OpChanges or an OpChanges* wrapper), then

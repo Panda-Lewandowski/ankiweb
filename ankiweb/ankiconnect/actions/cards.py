@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import Optional
 from anki.errors import NotFoundError
+from anki.utils import ids2str
 from ankiweb.ankiconnect.registry import action
 from ankiweb.ankiconnect.actions._helpers import card_to_info, run_emit
 from ankiweb.ankiconnect.schemas.cards import (
@@ -37,13 +38,12 @@ async def cards_mod_time(rt, cards=None):
     cards = cards or []
 
     def fn(col):
-        out = []
-        for cid in cards:
-            try:
-                out.append({"cardId": cid, "mod": col.get_card(cid).mod})
-            except Exception:
-                out.append({})
-        return out
+        if not cards:
+            return []
+        # One query instead of one DB round-trip per card (on PG that is N
+        # round-trips -> 1); `{}` for ids absent from the table, as before.
+        mods = dict(col.db.all(f"select id, mod from cards where id in {ids2str(cards)}"))
+        return [{"cardId": cid, "mod": mods[cid]} if cid in mods else {} for cid in cards]
     return await rt.service.run(fn)
 
 
@@ -78,13 +78,12 @@ async def are_suspended(rt, cards=None):
     cards = cards or []
 
     def fn(col):
-        out = []
-        for cid in cards:
-            try:
-                out.append(col.get_card(cid).queue == -1)
-            except Exception:
-                out.append(None)
-        return out
+        if not cards:
+            return []
+        # Batch the per-card queue read into one query (PG: N round-trips -> 1);
+        # `None` for ids absent from the table, `queue == -1` means suspended.
+        queues = dict(col.db.all(f"select id, queue from cards where id in {ids2str(cards)}"))
+        return [(queues[cid] == -1) if cid in queues else None for cid in cards]
     return await rt.service.run(fn)
 
 
@@ -102,13 +101,12 @@ async def get_ease_factors(rt, cards=None):
     cards = cards or []
 
     def fn(col):
-        out = []
-        for cid in cards:
-            try:
-                out.append(col.get_card(cid).factor)
-            except Exception:
-                out.append(None)  # faithful: AnkiConnect appends None for missing cards
-        return out
+        if not cards:
+            return []
+        # Batch the per-card factor read into one query (PG: N round-trips -> 1);
+        # `None` for ids absent from the table, faithful to AnkiConnect.
+        factors = dict(col.db.all(f"select id, factor from cards where id in {ids2str(cards)}"))
+        return [factors.get(cid) for cid in cards]
     return await rt.service.run(fn)
 
 

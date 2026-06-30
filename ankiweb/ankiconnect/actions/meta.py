@@ -41,6 +41,50 @@ async def reload_collection(rt):
     return None
 
 
+@action("_testSetConfig", summary="TEST-ONLY: set a collection config key (e.g. enable FSRS)")
+async def _test_set_config(rt, key=None, value=None):
+    # Loose-params test hook used by the PG-vs-SQLite scheduling faithfulness sim to
+    # enable FSRS (`fsrs`=true) before any reviews. Not part of the AnkiConnect API.
+    def fn(col):
+        col.set_config(key, value)
+        return None
+    await rt.service.run(fn)
+    return None
+
+
+@action("_testCardState", summary="TEST-ONLY: full scheduling state of cards for comparison")
+async def _test_card_state(rt, cards=None):
+    # Returns each card's scheduler/FSRS state (memory state s/d if FSRS, plus ivl/due/
+    # reps/lapses/factor/type/queue) keyed by note content, so a PG run and a SQLite run
+    # can be compared field-by-field independent of differing absolute ids.
+    cards = cards or []
+
+    def fn(col):
+        out = []
+        for cid in cards:
+            try:
+                c = col.get_card(cid)
+            except Exception:
+                out.append(None)
+                continue
+            ms = None
+            try:
+                m = c.memory_state
+                if m is not None:
+                    ms = {"stability": round(m.stability, 4), "difficulty": round(m.difficulty, 4)}
+            except Exception:
+                ms = None
+            note = c.note()
+            out.append({
+                "key": [note.note_type()["name"], list(note.fields), c.ord],
+                "type": int(c.type), "queue": int(c.queue), "due": c.due,
+                "ivl": c.ivl, "factor": c.factor, "reps": c.reps, "lapses": c.lapses,
+                "memory": ms,
+            })
+        return out
+    return await rt.service.run(fn)
+
+
 @action("getProfiles", params=GetProfilesParams, returns=list[str], summary="List profile names")
 async def get_profiles(rt):
     return ["User 1"]

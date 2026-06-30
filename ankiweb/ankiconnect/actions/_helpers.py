@@ -17,11 +17,16 @@ async def run_emit(rt, fn):
     return value
 
 
-def build_note(col, spec):
+def build_note(col, spec, model=None):
     """Build (not add) an anki Note from an AnkiConnect note spec. Case-insensitive field
-    matching. Media fields (audio/video/picture) deferred to B3."""
+    matching. Media fields (audio/video/picture) deferred to B3.
+
+    `model` may be passed pre-resolved so a batch caller (addNotes) resolves each
+    distinct modelName once instead of paying `models.by_name` (a DB round-trip on
+    PG) per note; omitted, it falls back to resolving from the spec as before."""
     spec = spec or {}
-    model = col.models.by_name(spec.get("modelName", ""))
+    if model is None:
+        model = col.models.by_name(spec.get("modelName", ""))
     if model is None:
         raise Exception("model was not found: " + str(spec.get("modelName")))
     note = col.new_note(model)

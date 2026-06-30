@@ -68,15 +68,30 @@ async def add_notes(rt, notes=None):
         added_ids = []
         errs = []
         last_op = None
+        # Resolve each distinct notetype/deck NAME -> id once for the whole batch,
+        # not per note: on PG `models.by_name` and `decks.id` are uncached DB
+        # round-trips, and a bulk addNotes is overwhelmingly one model + one deck.
+        # Output is identical (same model object, same deck id) — pure de-duplication.
+        model_cache = {}  # modelName -> model
+        deck_cache = {}   # deckName  -> did
         for spec in specs:
             try:
                 spec = spec or {}
                 attach_media(col, spec)
-                n, _ = build_note(col, spec)
+                mname = spec.get("modelName", "")
+                if mname not in model_cache:
+                    m = col.models.by_name(mname)
+                    if m is None:
+                        raise Exception("model was not found: " + str(mname))
+                    model_cache[mname] = m
+                n, _ = build_note(col, spec, model=model_cache[mname])
                 ok, err = check_addable(col, n, spec.get("options"))
                 if not ok:
                     raise Exception(err)
-                did = col.decks.id(spec.get("deckName", "Default"))
+                dname = spec.get("deckName", "Default")
+                if dname not in deck_cache:
+                    deck_cache[dname] = col.decks.id(dname)
+                did = deck_cache[dname]
                 last_op = col.add_note(n, did)
                 added_ids.append(n.id)
             except Exception as e:
