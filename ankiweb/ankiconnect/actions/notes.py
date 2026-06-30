@@ -1,7 +1,9 @@
 from __future__ import annotations
+import re
 from typing import Optional
+from anki.utils import split_fields
 from ankiweb.ankiconnect.registry import action
-from ankiweb.ankiconnect.actions._helpers import run_emit, build_note, check_addable
+from ankiweb.ankiconnect.actions._helpers import run_emit, build_note, check_addable, in_chunks
 from ankiweb.ankiconnect.actions.media import attach_media
 from ankiweb.ankiconnect.schemas.notes import (
     AddNoteParams, CanAddNoteParams, CanAddNoteWithErrorDetailParams, AddNotesParams,
@@ -121,19 +123,54 @@ async def find_notes(rt, query=None):
     return await rt.service.run(lambda col: list(col.find_notes(query or "")))
 
 
-from ankiweb.ankiconnect.actions._helpers import note_to_info  # noqa: E402
-
-
 @action("notesInfo", params=NotesInfoParams, summary="Full info for each note")
 async def notes_info(rt, notes=None, query=None):
     def fn(col):
         ids = list(notes) if notes is not None else list(col.find_notes(query or ""))
+        if not ids:
+            return []
+        # Batch the two per-note round-trips (col.get_note + note.card_ids()) into
+        # set-based reads. Byte-identical to the canonical per-note note_to_info loop
+        # (proven by the m12 probe): fields via split_fields, tags via the rslib
+        # separator set (' ' / '　', drop empties = split_tags), card ids in
+        # template (ord) order = note.card_ids(), mod/model straight from the row.
+        # On PG each get_note / card_ids() was a network round-trip; SQLite ran them
+        # in-process. Queries use the DISTINCT ids (so a duplicate id straddling a
+        # chunk boundary can't double a card list); the output loop walks the
+        # original `ids`, preserving order AND duplicate entries like the old loop.
+        distinct = list(dict.fromkeys(ids))
+        note_rows = {}
+        for chunk in in_chunks(distinct):
+            ph = ",".join("?" * len(chunk))
+            for nid, mid, mod, tags, flds in col.db.all(
+                    "select id, mid, mod, tags, flds from notes where id in (%s)" % ph, *chunk):
+                note_rows[nid] = (mid, mod, tags, flds)
+        cards_by_nid = {}
+        for chunk in in_chunks(distinct):
+            ph = ",".join("?" * len(chunk))
+            for nid, cid in col.db.all(
+                    "select nid, id from cards where nid in (%s) order by nid, ord" % ph, *chunk):
+                cards_by_nid.setdefault(nid, []).append(cid)
         out = []
         for nid in ids:
-            try:
-                out.append(note_to_info(col, col.get_note(nid)))
-            except Exception:
+            row = note_rows.get(nid)
+            model = col.models.get(row[0]) if row is not None else None
+            if model is None:            # unknown id / orphan note -> {} (get_note had raised)
                 out.append({})
+                continue
+            _mid, mod, tags, flds = row
+            field_vals = split_fields(flds)
+            fields = {name: {"value": field_vals[ord_], "order": ord_}
+                      for name, (ord_, _f) in col.models.field_map(model).items()}
+            out.append({
+                "noteId": nid,
+                "profile": "User 1",
+                "tags": [t for t in re.split(r"[ \u3000]", tags) if t],
+                "fields": fields,
+                "modelName": model["name"],
+                "mod": mod,
+                "cards": cards_by_nid.get(nid, []),
+            })
         return out
     return await rt.service.run(fn)
 
@@ -268,13 +305,17 @@ async def notes_mod_time(rt, notes=None):
     notes = notes or []
 
     def fn(col):
-        out = []
-        for nid in notes:
-            try:
-                out.append({"noteId": nid, "mod": col.get_note(nid).mod})
-            except Exception:
-                out.append({})
-        return out
+        if not notes:
+            return []
+        # Batch: one `id in (…)` read for all mod times instead of col.get_note per
+        # id (a PG network round-trip each). A missing id yields {} exactly like the
+        # old get_note/except path; the loop walks the original `notes` so order and
+        # duplicate entries are preserved.
+        mods = {}
+        for chunk in in_chunks(list(dict.fromkeys(notes))):
+            ph = ",".join("?" * len(chunk))
+            mods.update(col.db.all("select id, mod from notes where id in (%s)" % ph, *chunk))
+        return [{"noteId": nid, "mod": mods[nid]} if nid in mods else {} for nid in notes]
     return await rt.service.run(fn)
 
 

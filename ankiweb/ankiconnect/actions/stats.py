@@ -7,7 +7,12 @@ from ankiweb.ankiconnect.schemas.stats import (
     GetDeckStatsParams,
 )
 
-_REVLOG_COLS = "id, cid, usn, ease, ivl, lastIvl, factor, time, type"
+# NOTE: `lastIvl` is DOUBLE-QUOTED. The PG schema created the revlog column as
+# "lastIvl" (quoted, case-preserved, to mirror SQLite's camelCase). PG folds an
+# UNQUOTED `lastIvl` to `lastivl` -> undefined column (42703). Quoting works on
+# both backends (SQLite treats "lastIvl" as the identifier too). Used by the
+# cardReviews SELECT and the insertReviews INSERT, so both stay PG-safe.
+_REVLOG_COLS = 'id, cid, usn, ease, ivl, "lastIvl", factor, time, type'
 
 
 @action("getNumCardsReviewedToday", params=GetNumCardsReviewedTodayParams, returns=int,
@@ -24,9 +29,17 @@ async def get_num_cards_reviewed_today(rt):
 async def get_num_cards_reviewed_by_day(rt):
     def fn(col):
         offset = int(time.strftime("%H", time.localtime(col.sched.day_cutoff))) * 3600
-        return col.db.all(
-            'select date(id/1000 - ?, "unixepoch", "localtime") as day, count() '
-            "from revlog group by day order by day desc", offset)
+        # Bucket in Python instead of SQL `date(id/1000-?, 'unixepoch', 'localtime')`:
+        # PG has no such date() form (the SQLite-only modifiers). `time.localtime`
+        # uses the same system TZ database SQLite's 'localtime' does, and `rid//1000`
+        # is the same floor as SQLite's integer `id/1000`, so the 'YYYY-MM-DD' bucket
+        # strings + counts are byte-identical to the old SQL on BOTH backends
+        # (validated old-SQL-vs-this by the m12 probe). One query, grouped locally.
+        counts: dict[str, int] = {}
+        for rid in col.db.list("select id from revlog"):
+            day = time.strftime("%Y-%m-%d", time.localtime(rid // 1000 - offset))
+            counts[day] = counts.get(day, 0) + 1
+        return [[day, counts[day]] for day in sorted(counts, reverse=True)]
     return await rt.service.run(fn)
 
 
@@ -57,6 +70,9 @@ async def card_reviews(rt, deck=None, startID=0):
 async def get_reviews_of_cards(rt, cards=None):
     cards = [int(c) for c in (cards or [])]
     cols = ["cid", "id", "usn", "ease", "ivl", "lastIvl", "factor", "time", "type"]
+    # Quote `lastIvl` for the SQL (PG case-folding, see _REVLOG_COLS) but keep the
+    # plain `cols` names for the output dict keys below.
+    sql_cols = ", ".join('"%s"' % c if c == "lastIvl" else c for c in cols)
 
     def fn(col):
         cid_to_reviews = {}
@@ -64,7 +80,7 @@ async def get_reviews_of_cards(rt, cards=None):
             batch = cards[i:i + 999]
             ph = ",".join("?" * len(batch))
             for rev in col.db.all(
-                    "select {} from revlog where cid in ({})".format(", ".join(cols), ph), *batch):
+                    "select {} from revlog where cid in ({})".format(sql_cols, ph), *batch):
                 cid_to_reviews.setdefault(rev[0], []).append(rev[1:])
         return {c: [dict(zip(cols[1:], rev)) for rev in cid_to_reviews.get(c, [])] for c in cards}
     return await rt.service.run(fn)

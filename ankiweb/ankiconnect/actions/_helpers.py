@@ -4,6 +4,15 @@ from ankiweb.collection_service import op_changes_to_flags
 _EMPTY, _DUPLICATE = 1, 2  # note.fields_check() int states
 
 
+def in_chunks(seq, n=900):
+    """Yield slices of `seq` no larger than `n`. Lets a batched `... id in (?,?,…)`
+    read stay under SQLite's bound-variable limit (and well under PG's) for callers
+    that may pass thousands of ids; the per-chunk results merge into one dict, so the
+    output is identical to a single IN-list and to the original per-id loop."""
+    for i in range(0, len(seq), n):
+        yield seq[i:i + n]
+
+
 async def run_emit(rt, fn):
     """Run fn(col) -> (value, op_with_changes | None); broadcast its OpChanges flags on the
     bus (so an open web UI refreshes); return value. Tolerates a None op (no-op actions)."""

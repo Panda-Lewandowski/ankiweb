@@ -4,7 +4,7 @@ from typing import Optional
 from anki.errors import NotFoundError
 from anki.utils import ids2str
 from ankiweb.ankiconnect.registry import action
-from ankiweb.ankiconnect.actions._helpers import card_to_info, run_emit
+from ankiweb.ankiconnect.actions._helpers import card_to_info, run_emit, in_chunks
 from ankiweb.ankiconnect.schemas.cards import (
     FindCardsParams, CardsInfoParams, CardsModTimeParams, SuspendParams, UnsuspendParams,
     SuspendedParams, AreSuspendedParams, AreDueParams, GetEaseFactorsParams, SetEaseFactorsParams,
@@ -164,14 +164,35 @@ async def set_specific_value_of_card(rt, card=None, keys=None, newValues=None, w
 async def get_intervals(rt, cards=None, complete=False):
     cards = cards or []
     if not complete:
-        return await rt.service.run(lambda col: [col.get_card(cid).ivl for cid in cards])
+        # Batch: one `id in (…)` read for every card's current interval instead of
+        # col.get_card(cid).ivl per id (a PG round-trip each). Output order/dupes
+        # follow the input `cards`. An unknown id raises (KeyError) -> action error,
+        # the same "errors on a bad card id" contract as the old get_card(cid); for
+        # valid ids (the normal path) the result is byte-identical.
+        def fn_simple(col):
+            if not cards:
+                return []
+            ivl = {}
+            for chunk in in_chunks(list(dict.fromkeys(cards))):
+                ph = ",".join("?" * len(chunk))
+                ivl.update(col.db.all("select id, ivl from cards where id in (%s)" % ph, *chunk))
+            return [ivl[cid] for cid in cards]
+        return await rt.service.run(fn_simple)
 
     def fn(col):
-        out = []
-        for cid in cards:
-            ivls = col.db.list("select ivl from revlog where cid = ? order by id", cid)
-            out.append(ivls)
-        return out
+        if not cards:
+            return []
+        # complete=True: every card's full revlog interval history, ordered by
+        # revlog id. Batch the per-card revlog query into one `cid in (…)` read;
+        # `order by cid, id` reproduces, within each card, the same id order the old
+        # per-card `order by id` gave. A card with no revlog -> [] as before.
+        by_cid = {}
+        for chunk in in_chunks(list(dict.fromkeys(cards))):
+            ph = ",".join("?" * len(chunk))
+            for cid, ivl in col.db.all(
+                    "select cid, ivl from revlog where cid in (%s) order by cid, id" % ph, *chunk):
+                by_cid.setdefault(cid, []).append(ivl)
+        return [by_cid.get(cid, []) for cid in cards]
     return await rt.service.run(fn)
 
 
