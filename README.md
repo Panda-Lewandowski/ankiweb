@@ -85,6 +85,11 @@ conda run -n ankiweb python -m playwright install chromium
 conda run -n ankiweb python -m ankiweb
 ```
 
+> This runs the default **SQLite** backend. To run on **PostgreSQL** (the
+> concurrent multi-process backend) — env vars, the required `anki_pg_ext`
+> extension, the schema-per-collection model, migrating a collection, and the
+> test harness — see **[docs/PG-MODE.md](docs/PG-MODE.md)**.
+
 This starts **two servers in one process**:
 
 | Port | Serves | Default | Configure with |
