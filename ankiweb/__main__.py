@@ -113,12 +113,27 @@ def _spawn_workers(n: int) -> None:
             pass
 
 
+def _die_with_parent() -> None:
+    """Linux PR_SET_PDEATHSIG: ask the kernel to SIGTERM this worker if the supervisor
+    dies — even by SIGKILL or a crash, which the master cannot catch-and-forward. Closes
+    the orphan-worker gap that the master's normal SIGINT/SIGTERM forwarding already
+    covers for clean shutdown. Best-effort: a no-op off Linux / without libc."""
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, int(signal.SIGTERM))  # 1 = PR_SET_PDEATHSIG
+    except Exception:  # noqa: BLE001
+        return
+    if os.getppid() == 1:  # master already gone before we armed → reparented to init; bail now
+        os._exit(0)
+
+
 def main() -> None:
     workers = int(os.environ.get("ANKIWEB_WORKERS", "1") or "1")
     worker_id = os.environ.get("ANKIWEB_WORKER_ID")
     if worker_id is not None:
-        # spawned worker: serve this one process directly (own SO_REUSEPORT socket),
-        # notifier only on worker 0. Do NOT recurse into the supervisor.
+        # spawned worker: arm PR_SET_PDEATHSIG so a SIGKILLed/crashed master can't orphan
+        # us, then serve this one process directly. Do NOT recurse into the supervisor.
+        _die_with_parent()
         asyncio.run(_serve(worker_id=int(worker_id), reuse_port=True))
     elif workers > 1:
         _spawn_workers(workers)
