@@ -9,7 +9,8 @@ results, so the two stay equivalent by construction.
 - **SQLite** — single process per collection (`max_workers=1` + an asyncio lock). The
   default; needs nothing extra.
 - **PostgreSQL** — **N processes can serve ONE collection concurrently** (the whole
-  point of the rewrite). Each collection lives in its own PG **schema**.
+  point of the rewrite), launched as one command with `ANKIWEB_WORKERS=N` (§3). Each
+  collection lives in its own PG **schema**.
 
 ---
 
@@ -127,6 +128,43 @@ ANKIWEB_PG_SCHEMA="mycollection" \
   folder (`…/foo.anki2` → `…/foo.media` via a `.anki2`→`.media` rewrite). End the path
   with `.anki2`; the basename is free.
 
+### Scaling out: N worker processes behind ONE port (`ANKIWEB_WORKERS`)
+
+A single ankiweb process serializes everything (`max_workers=1` + an asyncio lock), so
+one process never uses PG's concurrency no matter the backend. To actually run N
+processes over the one collection you used to launch N copies by hand on N different
+ports and load-balance in front. **`ANKIWEB_WORKERS=N` does that internally:** the
+command below stays a *single* invocation on the *single* `ANKIWEB_AC_PORT`, but the
+master pre-forks N worker processes that all bind that port via `SO_REUSEPORT`, so the
+kernel spreads connections across them — no per-process ports, no external proxy.
+
+```bash
+# exactly the PG command above, plus ONE var:
+ANKIWEB_WORKERS=8 \
+ANKIWEB_PG_DSN="postgresql://USER:PASS@HOST:5432/DBNAME" \
+ANKIWEB_PG_SCHEMA="mycollection" ANKIWEB_AC_PORT="18765" … \
+<fork-wheel-python> -m ankiweb
+# → "[ankiweb] 8 PG workers up — AC :18765, web :… (SO_REUSEPORT, schema=mycollection)"
+```
+
+- **PostgreSQL only.** `ANKIWEB_WORKERS>1` refuses to start without `ANKIWEB_PG_DSN` —
+  SQLite cannot be shared by multiple writer processes. `ANKIWEB_WORKERS=1` (default) is
+  the unchanged single-process path.
+- **Each worker opens its own PG connection** to the one shared schema → true N-way
+  concurrency (`id` minting is race-safe across processes: revlog/notes/cards ids come
+  from wall-clock sequences, uniqueness guaranteed by the PK). Kill with one Ctrl-C /
+  `SIGTERM` on the master; it forwards to the whole worker group.
+- **Push notifier runs in worker 0 only** (else N workers would each push). A
+  `setNotifyConfig` that lands on any worker is picked up within one poll cycle (worker 0
+  re-reads `notify.json`).
+- **Measuring throughput:** use `curl`, a browser, or the real AnkiConnect clients — a
+  single **8-worker fleet scales ~1.98x** over one worker on concurrent `curl`. Do NOT
+  benchmark it with a Python **`httpx`** client: httpx has a ~40 ms per-request stall
+  against a `SO_REUSEPORT` pool that makes the fleet *look* slower than one worker — a
+  client-side artifact, not the server (see `docs/pg-rewrite/m17_prefork_workers.py`).
+- Sizing: workers are real processes; keep `N ≤ cores` and mind PG `max_connections`
+  (each worker holds ~1 connection). Start around the number of CPU cores.
+
 ---
 
 ## 4. The schema model (one collection = one schema)
@@ -221,3 +259,5 @@ so the test database normally looks **empty** between runs (by design).
 | "I see no tables" in a GUI | looking at `public` (only functions there) | open the collection's **schema** (§4) |
 | `addNote: model was not found: Basic` | `ANKIWEB_LANG=zh-CN` localizes model names | use the localized name (e.g. `问答题`) or set lang `en` |
 | test DB looks empty | per-test schemas are dropped after each run | expected; not a failure |
+| `ANKIWEB_WORKERS>1 requires PostgreSQL` on startup | multi-worker needs PG (SQLite is single-writer) | set `ANKIWEB_PG_DSN`, or use `ANKIWEB_WORKERS=1` |
+| multi-worker looks *slower* than 1 worker in a benchmark | Python `httpx` stalls ~40 ms/req against a `SO_REUSEPORT` pool (client artifact) | benchmark with `curl` / real clients; the fleet scales ~1.98x (§3) |
