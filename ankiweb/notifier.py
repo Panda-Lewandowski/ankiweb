@@ -167,24 +167,36 @@ class DeckNotifier:
     def __init__(self, state: NotifierState,
                  fetch: Callable[[], Awaitable[dict]],
                  post: Optional[Callable[[NotifyConfig, dict], Awaitable[tuple]]] = None,
-                 now: Callable[[], float] = time.time):
+                 now: Callable[[], float] = time.time,
+                 watch_config: bool = False):
         self.state = state
         self._fetch = fetch                    # async () -> snapshot dict
         self._post = post or self._http_post   # async (cfg, payload) -> (ok, error)
         self._now = now
+        # Multi-worker (ANKIWEB_WORKERS>1): only worker 0 runs the notifier, but
+        # setNotifyConfig may land on ANY worker (they share one port). Each worker's
+        # NotifierState is in-process, so worker 0 can't see another worker's update()
+        # via self.changed. When watch_config is set, reload the config from the shared
+        # notify.json each cycle (and re-poll while idle) so those changes still take
+        # effect — within one poll interval instead of instantly.
+        self._watch_config = watch_config
         self.last_notified: dict[str, tuple] = {}  # deck name -> acknowledged (new, learn, review)
         self._last_sig = None  # (url, scope): a change re-syncs the receiver from scratch
 
     async def run(self) -> None:
         try:
             while True:
+                if self._watch_config:  # pick up setNotifyConfig from other workers
+                    self.state.config = NotifyConfig.load(self.state.config_path)
                 cfg = self.state.config
                 if not cfg.active():
                     self.last_notified = {}
                     self._last_sig = None
                     st = self.state.status
                     st.watching = st.learnable = st.pending = 0  # don't show stale counts
-                    await self._wait(None)  # idle until the config changes
+                    # idle until the config changes; in watch mode re-poll notify.json so
+                    # an activation done on another worker is still detected.
+                    await self._wait(max(5.0, cfg.poll_sec) if self._watch_config else None)
                     continue
                 sig = (cfg.url, cfg.scope)
                 if sig != self._last_sig or self.state.resync_pending:
