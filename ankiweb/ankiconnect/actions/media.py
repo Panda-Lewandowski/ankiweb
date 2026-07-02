@@ -78,6 +78,12 @@ def attach_media(col, spec):
     into the target fields of spec['fields'] (mutates spec['fields'] in place). Only
     appends to fields that actually exist on the note's model (ref addMedia 769-800)."""
     fields = spec.setdefault("fields", {})
+    # Early-out when the spec carries no media: the loop below would be a no-op, but the
+    # `models.by_name` + `field_names` lookups above are an uncached DB round-trip per note
+    # on PG (a bulk addNotes with no media paid ~10% of its time here for nothing). Nothing
+    # is mutated, so this is behaviour-identical.
+    if not any(spec.get(kind) for kind in ("picture", "audio", "video")):
+        return
     model = col.models.by_name(spec.get("modelName", ""))
     valid = set(col.models.field_names(model)) if model else None
     for kind, tmpl in (("picture", '<img src="%s">'), ("audio", "[sound:%s]"),
