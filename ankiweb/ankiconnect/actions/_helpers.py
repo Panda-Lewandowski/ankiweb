@@ -13,6 +13,34 @@ def in_chunks(seq, n=900):
         yield seq[i:i + n]
 
 
+# PG multi-worker: two workers get-or-creating the same deck/notetype (or colliding
+# on a same-millisecond id) race on the unique indexes; the loser's INSERT fails with
+# SqlState 23505 instead of resolving the winner's row. These markers identify exactly
+# that failure shape. SQLite never produces them (single exclusive writer), so the
+# retry below is inert there and canonical behavior is unchanged.
+_CREATE_RACE_MARKERS = (
+    "idx_decks_name", "idx_notetypes_name", "decks_pkey", "notetypes_pkey", "E23505",
+)
+
+
+def _is_create_race(exc: Exception) -> bool:
+    msg = str(exc)
+    return any(marker in msg for marker in _CREATE_RACE_MARKERS)
+
+
+async def retry_create_races(call, attempts=3):
+    """await call(), retrying when a PG unique-violation shows a concurrent worker won
+    a get-or-create race. The op re-runs in a fresh transaction where the get-or-create
+    resolves the winner's committed row (or, for createModel, reports the canonical
+    "Model name already exists"). Only for idempotent-on-retry operations."""
+    for attempt in range(attempts):
+        try:
+            return await call()
+        except Exception as exc:
+            if attempt + 1 >= attempts or not _is_create_race(exc):
+                raise
+
+
 async def run_emit(rt, fn):
     """Run fn(col) -> (value, op_with_changes | None); broadcast its OpChanges flags on the
     bus (so an open web UI refreshes); return value. Tolerates a None op (no-op actions)."""
@@ -75,9 +103,16 @@ def note_to_info(col, note):
     }
 
 
-def card_to_info(col, card):
+def card_to_info(col, card, model_cache=None):
+    """`model_cache` ({mid: model dict}) lets a batch caller (cardsInfo) resolve each
+    distinct notetype once per call instead of once per card — same dict either way."""
     note = card.note()
-    model = note.note_type()
+    if model_cache is None:
+        model = note.note_type()
+    else:
+        if note.mid not in model_cache:
+            model_cache[note.mid] = note.note_type()
+        model = model_cache[note.mid]
     fields = {}
     for name, (ord_, _f) in col.models.field_map(model).items():
         fields[name] = {"value": note.fields[ord_], "order": ord_}

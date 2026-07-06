@@ -1,5 +1,6 @@
 from __future__ import annotations
 from ankiweb.ankiconnect.registry import action
+from ankiweb.ankiconnect.actions._helpers import retry_create_races
 from ankiweb.ankiconnect.schemas.decks import (
     DeckNamesParams, DeckNamesAndIdsParams, GetDecksParams, CreateDeckParams, ChangeDeckParams,
     DeleteDecksParams, GetDeckConfigParams, SaveDeckConfigParams, SetDeckConfigIdParams,
@@ -48,8 +49,10 @@ async def get_decks(rt, cards=None):
 
 @action("createDeck", params=CreateDeckParams, returns=int, summary="Create a deck")
 async def create_deck(rt, deck=None):
-    # get-or-create; returns the deck id (AnkiConnect semantics)
-    return await rt.service.run(lambda col: col.decks.id(deck))
+    # get-or-create; returns the deck id (AnkiConnect semantics). Retried on the PG
+    # multi-worker race where a peer creates the same (parent) deck concurrently.
+    return await retry_create_races(
+        lambda: rt.service.run(lambda col: col.decks.id(deck)))
 
 
 @action("changeDeck", params=ChangeDeckParams, summary="Move cards to a deck")
@@ -59,7 +62,8 @@ async def change_deck(rt, cards=None, deck=None):
     def fn(col):
         did = col.decks.id(deck)  # create target if missing
         return col.set_deck(cards, did)
-    await rt.service.run_op(fn, initiator="ankiconnect")
+    await retry_create_races(
+        lambda: rt.service.run_op(fn, initiator="ankiconnect"))
     return None
 
 

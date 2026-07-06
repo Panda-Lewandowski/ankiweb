@@ -3,7 +3,8 @@ import re
 from typing import Optional
 from anki.utils import split_fields
 from ankiweb.ankiconnect.registry import action
-from ankiweb.ankiconnect.actions._helpers import run_emit, build_note, check_addable, in_chunks
+from ankiweb.ankiconnect.actions._helpers import (
+    run_emit, build_note, check_addable, in_chunks, retry_create_races)
 from ankiweb.ankiconnect.actions.media import attach_media
 from ankiweb.ankiconnect.schemas.notes import (
     AddNoteParams, CanAddNoteParams, CanAddNoteWithErrorDetailParams, AddNotesParams,
@@ -28,7 +29,8 @@ async def add_note(rt, note=None):
         did = col.decks.id(spec.get("deckName", "Default"))
         res = col.add_note(n, did)
         return n.id, res
-    return await run_emit(rt, fn)
+    # retried when the auto-created target deck races a concurrent worker (PG)
+    return await retry_create_races(lambda: run_emit(rt, fn))
 
 
 @action("canAddNote", params=CanAddNoteParams, returns=bool, summary="Can a note be added")
@@ -103,19 +105,51 @@ async def add_notes(rt, notes=None):
                 col.remove_notes(added_ids)
             raise Exception(str(errs))
         return added_ids, last_op
-    return await run_emit(rt, fn)
+    # retried when an auto-created target deck races a concurrent worker (PG); the
+    # failing run rolls its notes back, so the rerun re-adds the full batch cleanly
+    return await retry_create_races(lambda: run_emit(rt, fn))
+
+
+def _can_add_batch(col, specs, detail):
+    """Per-note addability, evaluated in ONE collection op with the notetype resolved
+    once per distinct modelName. Result-identical to looping the single-note actions
+    (each note still judged independently, exceptions folded per note), but a batch of
+    N notes costs one op + one dup-check per note instead of N full ops — on PG the
+    per-op epoch poll and per-note `models.by_name` round-trips dominated."""
+    model_cache = {}
+    out = []
+    for spec in specs:
+        try:
+            spec = spec or {}
+            mname = spec.get("modelName", "")
+            if mname not in model_cache:
+                model_cache[mname] = col.models.by_name(mname)
+            model = model_cache[mname]
+            if model is None:
+                raise Exception("model was not found: " + str(mname))
+            n, _ = build_note(col, spec, model=model)
+            ok, err = check_addable(col, n, spec.get("options"))
+            if detail:
+                out.append({"canAdd": ok} if ok else {"canAdd": False, "error": err})
+            else:
+                out.append(ok)
+        except Exception as exc:
+            out.append({"canAdd": False, "error": str(exc)} if detail else False)
+    return out
 
 
 @action("canAddNotes", params=CanAddNotesParams, returns=list[bool],
         summary="Can each note be added")
 async def can_add_notes(rt, notes=None):
-    return [await can_add_note(rt, note=n) for n in (notes or [])]
+    specs = notes or []
+    return await rt.service.run(lambda col: _can_add_batch(col, specs, detail=False))
 
 
 @action("canAddNotesWithErrorDetail", params=CanAddNotesWithErrorDetailParams,
         summary="Can each note be added (with error detail)")
 async def can_add_notes_with_error_detail(rt, notes=None):
-    return [await can_add_note_with_error_detail(rt, note=n) for n in (notes or [])]
+    specs = notes or []
+    return await rt.service.run(lambda col: _can_add_batch(col, specs, detail=True))
 
 
 @action("findNotes", params=FindNotesParams, returns=list[int], summary="Find note ids by query")
@@ -152,9 +186,12 @@ async def notes_info(rt, notes=None, query=None):
                     "select nid, id from cards where nid in (%s) order by nid, ord" % ph, *chunk):
                 cards_by_nid.setdefault(nid, []).append(cid)
         out = []
+        model_cache = {}  # distinct notetypes resolved once per call, not per note
         for nid in ids:
             row = note_rows.get(nid)
-            model = col.models.get(row[0]) if row is not None else None
+            if row is not None and row[0] not in model_cache:
+                model_cache[row[0]] = col.models.get(row[0])
+            model = model_cache.get(row[0]) if row is not None else None
             if model is None:            # unknown id / orphan note -> {} (get_note had raised)
                 out.append({})
                 continue

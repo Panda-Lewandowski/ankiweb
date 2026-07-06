@@ -24,9 +24,10 @@ async def cards_info(rt, cards=None):
 
     def fn(col):
         out = []
+        model_cache = {}  # distinct notetypes resolved once per call, not per card
         for cid in cards:
             try:
-                out.append(card_to_info(col, col.get_card(cid)))
+                out.append(card_to_info(col, col.get_card(cid), model_cache))
             except Exception:
                 out.append({})
         return out

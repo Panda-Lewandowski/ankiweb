@@ -26,7 +26,11 @@ def _reuseport_sock(host: str, port: int) -> socket.socket:
     # uvicorn hands the bound-but-unlistened socket to asyncio's create_server, which
     # does the listen + non-blocking + per-connection setup itself; passing a socket we
     # already listen()ed on took a degraded accept path (~40ms/request, TCP-stalled).
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # proto MUST be IPPROTO_TCP (not the 0 that socket() defaults to): accepted sockets
+    # inherit the listener's proto, and asyncio's _set_nodelay only applies TCP_NODELAY
+    # when sock.proto == IPPROTO_TCP — with proto 0, every keep-alive request after the
+    # first stalls ~40ms on Nagle + delayed-ACK, capping each connection at ~25 req/s.
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     s.bind((host, port))

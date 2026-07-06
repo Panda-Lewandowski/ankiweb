@@ -1,7 +1,7 @@
 from __future__ import annotations
 import re
 from ankiweb.ankiconnect.registry import action
-from ankiweb.ankiconnect.actions._helpers import run_emit
+from ankiweb.ankiconnect.actions._helpers import run_emit, retry_create_races
 from ankiweb.ankiconnect.schemas.models import (
     ModelNamesParams, ModelNamesAndIdsParams, ModelFieldNamesParams,
     ModelFieldDescriptionsParams, ModelFieldFontsParams, ModelTemplatesParams,
@@ -162,7 +162,9 @@ async def create_model(rt, modelName=None, inOrderFields=None, cardTemplates=Non
             m["type"] = 1
         op = col.models.add_dict(m)
         return col.models.get(op.id), op  # return the persisted model dict
-    return await run_emit(rt, fn)
+    # PG race: a concurrent worker creating the same name loses on idx_notetypes_name;
+    # the rerun then reports the canonical "Model name already exists" instead of a DbError
+    return await retry_create_races(lambda: run_emit(rt, fn))
 
 
 @action("updateModelTemplates", params=UpdateModelTemplatesParams,
