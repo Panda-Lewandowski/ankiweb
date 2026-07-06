@@ -20,3 +20,7 @@ ankiweb/_import_tmp/
 
 # Claude Code runtime state (session locks, scheduled-task bookkeeping)
 .claude/
+
+data/
+bench/**/*.json
+bench/**/*.md

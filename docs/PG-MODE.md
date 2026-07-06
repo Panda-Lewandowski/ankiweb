@@ -157,11 +157,21 @@ ANKIWEB_PG_SCHEMA="mycollection" ANKIWEB_AC_PORT="18765" … \
 - **Push notifier runs in worker 0 only** (else N workers would each push). A
   `setNotifyConfig` that lands on any worker is picked up within one poll cycle (worker 0
   re-reads `notify.json`).
-- **Measuring throughput:** use `curl`, a browser, or the real AnkiConnect clients — a
-  single **8-worker fleet scales ~1.98x** over one worker on concurrent `curl`. Do NOT
-  benchmark it with a Python **`httpx`** client: httpx has a ~40 ms per-request stall
-  against a `SO_REUSEPORT` pool that makes the fleet *look* slower than one worker — a
-  client-side artifact, not the server (see `docs/pg-rewrite/m17_prefork_workers.py`).
+- **Correctness across workers is handled.** A notetype/deck change committed by one
+  worker is seen by the others (cross-process `meta_epoch` cache invalidation; the fork
+  also bypasses pylib's in-process notetype dict in PG mode so a peer's field/template
+  edit can't be served stale). Two workers creating the same deck/notetype at once resolve
+  to one row — the loser's unique-violation is retried as a get-or-create, not surfaced.
+- **Measuring throughput:** any keep-alive client works — `curl`, a browser, the real
+  AnkiConnect clients, or a Python `httpx`/multiprocessing load driver. On a concurrent,
+  multi-deck workload a **4-worker PG fleet scales ~2–3× the read throughput and ~3× a
+  mixed read/write load** over a single worker (`bench/` in this repo). *(Historical note:
+  an earlier build showed a flat ~40 ms per request under `SO_REUSEPORT` and looked
+  **slower** than one worker — that was a server bug, not the client: the reuseport socket
+  was created with the default protocol `0` instead of `IPPROTO_TCP`, so asyncio's
+  `_set_nodelay` skipped it and every keep-alive request after the first stalled on Nagle +
+  delayed-ACK. Fixed in `ankiweb/__main__.py:_reuseport_sock` — keep-alive round-trips
+  dropped 41 ms → 0.3 ms.)*
 - Sizing: workers are real processes; keep `N ≤ cores` and mind PG `max_connections`
   (each worker holds ~1 connection). Start around the number of CPU cores.
 
@@ -260,4 +270,4 @@ so the test database normally looks **empty** between runs (by design).
 | `addNote: model was not found: Basic` | `ANKIWEB_LANG=zh-CN` localizes model names | use the localized name (e.g. `问答题`) or set lang `en` |
 | test DB looks empty | per-test schemas are dropped after each run | expected; not a failure |
 | `ANKIWEB_WORKERS>1 requires PostgreSQL` on startup | multi-worker needs PG (SQLite is single-writer) | set `ANKIWEB_PG_DSN`, or use `ANKIWEB_WORKERS=1` |
-| multi-worker looks *slower* than 1 worker in a benchmark | Python `httpx` stalls ~40 ms/req against a `SO_REUSEPORT` pool (client artifact) | benchmark with `curl` / real clients; the fleet scales ~1.98x (§3) |
+| every multi-worker request takes a flat ~40 ms (fleet looks slower than 1 worker) | old build before the `TCP_NODELAY` fix — the `SO_REUSEPORT` socket lacked `IPPROTO_TCP`, so Nagle + delayed-ACK stalled each keep-alive request | update/rebuild; the fix is in `ankiweb/__main__.py:_reuseport_sock` (§3). A 4-worker fleet then scales ~2–3× (§3) |

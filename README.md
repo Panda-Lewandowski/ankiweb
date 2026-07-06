@@ -85,10 +85,9 @@ conda run -n ankiweb python -m playwright install chromium
 conda run -n ankiweb python -m ankiweb
 ```
 
-> This runs the default **SQLite** backend. To run on **PostgreSQL** (the
-> concurrent multi-process backend) — env vars, the required `anki_pg_ext`
-> extension, the schema-per-collection model, migrating a collection, and the
-> test harness — see **[docs/PG-MODE.md](docs/PG-MODE.md)**.
+> This runs the default **SQLite** backend. To put a collection on **PostgreSQL** and
+> serve it from several worker processes at once, see **[Storage backends](#storage-backends-sqlite-default-or-postgresql)**
+> below (full runbook in **[docs/PG-MODE.md](docs/PG-MODE.md)**).
 
 This starts **two servers in one process**:
 
@@ -99,6 +98,36 @@ This starts **two servers in one process**:
 
 Open <http://127.0.0.1:8000> in a browser. The AnkiConnect port defaults to **8765** on
 purpose — existing AnkiConnect clients/scripts work unchanged.
+
+## Storage backends: SQLite (default) or PostgreSQL
+
+ankiweb runs on **two storage backends from the same code** — the original **SQLite**
+(default) and **PostgreSQL** (opt-in). PG is an *additive*, translation-style port in the
+forked `anki` rslib (SQLite is never disabled); a differential CI gate runs both side by
+side and asserts byte-for-byte identical results, so the two stay equivalent by
+construction. There is exactly one reason to switch: **PG lets N worker processes serve one
+collection concurrently**, which SQLite — a single exclusive writer — cannot.
+
+- **SQLite** (default) — nothing extra; one process, one `.anki2` file per collection.
+- **PostgreSQL** — set `ANKIWEB_PG_DSN`; the collection lives in a PG **schema** instead of
+  an `.anki2` file (that path then only derives the media folder). Requires the `anki_pg_ext`
+  PostgreSQL extension and the forked `anki` wheel — see the runbook.
+- **Multi-process** — add `ANKIWEB_WORKERS=N` (PG only): still one command on one
+  `ANKIWEB_AC_PORT`, but the master pre-forks N workers that share the port via
+  `SO_REUSEPORT`, so the kernel spreads connections across them — no per-worker ports, no
+  external proxy. On a concurrent workload a 4-worker fleet runs **~2–3× the read throughput
+  and ~3× a mixed read/write load** of a single worker (benchmarked; see the runbook).
+
+**Migrating an existing SQLite collection** into PG (apkg whole-collection, or byte-exact
+colpkg with full revlog), building the extension, the schema-per-collection model, and the
+PG test harness are all covered in the full runbook:
+**[docs/PG-MODE.md](docs/PG-MODE.md)**.
+
+| Variable (PG mode) | Default | Meaning |
+|----------|---------|---------|
+| `ANKIWEB_PG_DSN` | *(empty → SQLite)* | PostgreSQL DSN, e.g. `postgresql://user:pass@host:5432/db`. Setting it switches the backend to PostgreSQL. |
+| `ANKIWEB_PG_SCHEMA` | `ankiweb` | Which schema (= which collection) to open. A new name auto-bootstraps an empty collection; an existing one is reopened. |
+| `ANKIWEB_WORKERS` | `1` | Number of pre-forked worker processes behind one `ANKIWEB_AC_PORT`. PG only — `>1` refuses to start without `ANKIWEB_PG_DSN` (SQLite can't be shared by multiple writers). Keep `N ≤ cores` and mind PG `max_connections`. |
 
 ## Configuration
 
