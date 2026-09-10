@@ -9,7 +9,8 @@ from anki.errors import NotFoundError
 
 from ankiweb.anki_core.adapter import AnkiAdapter
 from ankiweb.anki_core.review_sessions import ReviewSessionError
-from ankiweb.api.schemas import AnswerRequest, CheckRequest
+from ankiweb.api.schemas import AnswerRequest, CheckRequest, LessonBatchRequest
+from ankiweb.language.card_types import parse_lesson_batch
 from ankiweb.tts import TTSUnavailable, synthesize_tts
 
 
@@ -94,5 +95,15 @@ def build_router(
     @router.post("/cards/{card_id}/bury")
     async def bury(card_id: int):
         return await invoke(get_adapter().bury(card_id))
+
+    @router.post("/lesson-cards/batch")
+    async def lesson_cards_batch(request: LessonBatchRequest):
+        payload = request.model_dump(mode="json", exclude={"commit"})
+        batch = parse_lesson_batch(payload)
+        return await invoke(get_adapter().lesson_cards_batch(batch, commit=request.commit))
+
+    @router.get("/lesson-cards/receipts")
+    async def lesson_import_receipts(limit: int = 20):
+        return await invoke(get_adapter().lesson_receipts(max(1, min(limit, 50))))
 
     return router

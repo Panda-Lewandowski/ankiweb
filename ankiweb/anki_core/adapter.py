@@ -18,11 +18,14 @@ from ankiweb.anki_core.review_sessions import (
     ReviewSessionStore,
     ReviewTokenNotRevealed,
 )
+from ankiweb.anki_core.lesson_imports import process_lesson_batch
 from ankiweb.anki_core.dto import (
     AnswerDTO, BackDTO, CardActionDTO, CardSummaryDTO, CheckDTO, HealthDTO,
     QuestionDTO, ReviewDTO, TTSSpecDTO, TodayDTO,
 )
 from ankiweb.collection_service import CollectionService
+from ankiweb.language.card_types import LessonBatch
+from ankiweb.language.receipts import LessonReceiptStore
 
 Language = Literal["spanish", "english"]
 LANGUAGE_DECKS: dict[str, str] = {
@@ -177,6 +180,8 @@ class AnkiAdapter:
         self._service = service
         self._sessions = ReviewSessionStore(token_ttl_seconds)
         self._lock = asyncio.Lock()
+        self._receipts = LessonReceiptStore(
+            service.settings.collection_path.parent / "lesson-receipts")
 
     async def health(self) -> HealthDTO:
         data = await self._service.run(lambda col: {
@@ -315,6 +320,33 @@ class AnkiAdapter:
             if not locale or not text:
                 raise ReviewConflict("listening card has no TTS source")
             return {"text": text, "locale": locale}
+
+    async def lesson_cards_batch(self, batch: LessonBatch, *, commit: bool) -> dict:
+        """Preview or safely apply a lesson import without touching scheduler state."""
+        async with self._lock:
+            deck_name = LANGUAGE_DECKS[batch.language]
+
+            def process(col):
+                deck_id = _require_language_deck(col, deck_name)
+                return process_lesson_batch(col, batch, deck_name, deck_id, commit=commit)
+
+            result, flags = await self._service.run(process)
+            if flags:
+                await self._service.emit(flags, "language-trainer-lesson-import")
+            if commit:
+                durable = await self._receipts.save({
+                    "mode": result["mode"],
+                    "lesson": result["lesson"],
+                    "summary": result["summary"],
+                    "items": result["items"],
+                    "errors": result["errors"],
+                })
+                result["receipt_id"] = durable["receipt_id"]
+                result["created_at"] = durable["created_at"]
+            return result
+
+    async def lesson_receipts(self, limit: int = 20) -> list[dict]:
+        return await self._receipts.list(limit)
 
     async def _card_action(self, card_id: int, action: str) -> CardActionDTO:
         async with self._lock:

@@ -1,4 +1,7 @@
-import type { AnswerResponse, CheckResponse, Language, Rating, ReviewCard, TodaySummary } from './types';
+import type {
+  AnswerResponse, CheckResponse, Language, LessonBatchPayload, LessonImportResult,
+  LessonReceipt, Rating, ReviewCard, TodaySummary,
+} from './types';
 
 export class ApiError extends Error {
   constructor(message: string, readonly status?: number) {
@@ -71,4 +74,13 @@ export const api = {
   ),
   suspend: (cardId: number) => request(`/api/cards/${cardId}/suspend`, { method: 'POST' }),
   bury: (cardId: number) => request(`/api/cards/${cardId}/bury`, { method: 'POST' }),
+  previewLesson: (payload: LessonBatchPayload) => request<LessonImportResult>(
+    '/api/lesson-cards/batch',
+    { method: 'POST', body: JSON.stringify({ ...payload, commit: false }) },
+  ),
+  importLesson: (payload: LessonBatchPayload) => request<LessonImportResult>(
+    '/api/lesson-cards/batch',
+    { method: 'POST', body: JSON.stringify({ ...payload, commit: true }) },
+  ),
+  lessonReceipts: () => request<LessonReceipt[]>('/api/lesson-cards/receipts?limit=10'),
 };

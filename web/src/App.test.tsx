@@ -14,6 +14,31 @@ describe('Language Trainer', () => {
       const path = String(input);
       if (path.includes('/api/today?language=spanish')) return Response.json(today('spanish', 2));
       if (path.includes('/api/today?language=english')) return Response.json(today('english', 0));
+      if (path.includes('/api/lesson-cards/receipts')) return Response.json([]);
+      if (path.includes('/api/lesson-cards/batch')) {
+        const request = JSON.parse(String(init?.body));
+        const committed = request.commit === true;
+        const summary = {
+          added: committed ? 1 : 0,
+          would_add: committed ? 0 : 1,
+          updated_metadata: 0,
+          would_update_metadata: 0,
+          duplicates: 1,
+          error_count: 0,
+        };
+        return Response.json({
+          mode: committed ? 'commit' : 'preview',
+          lesson: request.lesson,
+          summary,
+          ...summary,
+          items: [
+            { index: 1, status: committed ? 'added' : 'would_add', model: 'Personal Error', deck: 'Languages::Spanish' },
+            { index: 2, status: 'skipped_duplicate', model: 'Listening Dictation', deck: 'Languages::Spanish' },
+          ],
+          errors: [],
+          receipt_id: committed ? 'receipt-1234567890' : null,
+        });
+      }
       if (path.includes('/api/review/next')) return Response.json({
         token: 'token-1', expires_in_seconds: 1200, language: 'spanish', card_id: 1, note_id: 2,
         question: { kind: 'vocabulary_production', prompt_html: 'воспользоваться возможностью',
@@ -82,5 +107,25 @@ describe('Language Trainer', () => {
     fireEvent.click(await screen.findByRole('button', { name: /знаю/i }));
     expect(await screen.findByText(/результат не подтверждён/i)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('воспользоваться')).toBeInTheDocument());
+  });
+
+  it('previews a lesson batch before the explicit import', async () => {
+    render(<App />);
+    await screen.findByText('Испанский');
+    fireEvent.click(screen.getByRole('button', { name: 'Импорт урока' }));
+    expect(await screen.findByRole('heading', { name: 'Карточки из урока' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Проверить без изменений' }));
+    expect(await screen.findByText('План готов')).toBeInTheDocument();
+    expect(screen.getByText('Будет добавлена')).toBeInTheDocument();
+    expect(screen.getByText('Дубликат пропущен')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Импортировать 1' }));
+    expect(await screen.findByText('Импорт завершён')).toBeInTheDocument();
+    expect(screen.getByText(/receipt-12/i)).toBeInTheDocument();
+
+    const calls = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/lesson-cards/batch'));
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(String(calls[0][1]?.body)).commit).toBe(false);
+    expect(JSON.parse(String(calls[1][1]?.body)).commit).toBe(true);
   });
 });

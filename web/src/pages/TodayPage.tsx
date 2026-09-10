@@ -1,4 +1,4 @@
-import { ArrowRight, BookOpen, CheckCircle2, LoaderCircle, RefreshCw, Settings, Wifi, WifiOff } from 'lucide-react';
+import { ArrowRight, BookOpen, BookPlus, CheckCircle2, LoaderCircle, RefreshCw, Settings, Wifi, WifiOff } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
 import type { Language, TodaySummary } from '../api/types';
@@ -18,7 +18,13 @@ function greeting() {
   return 'Добрый вечер';
 }
 
-export function TodayPage({ onStart }: { onStart: (language: Language, total: number) => void }) {
+export function TodayPage({
+  onStart,
+  onImport,
+}: {
+  onStart: (language: Language, total: number) => void;
+  onImport: () => void;
+}) {
   const [summaries, setSummaries] = useState<Partial<Record<Language, TodaySummary>>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -57,6 +63,9 @@ export function TodayPage({ onStart }: { onStart: (language: Language, total: nu
             <connection.Icon size={14} className={loading ? 'spin' : undefined} aria-hidden="true" />
             <span>{connection.label}</span>
           </div>
+          <Button size="icon" variant="quiet" onClick={onImport} aria-label="Импорт урока">
+            <BookPlus size={17} aria-hidden="true" />
+          </Button>
           <Button asChild size="icon" variant="quiet">
             <a href="/settings" aria-label="Настройки Anki">
               <Settings size={17} aria-hidden="true" />

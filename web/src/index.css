@@ -30,7 +30,7 @@
 
 * { box-sizing: border-box; }
 html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
-button, input { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 
 .app-shell { min-height: 100dvh; color: var(--glass-text); }
@@ -79,6 +79,51 @@ button { -webkit-tap-highlight-color: transparent; }
 .summary-skeleton { height: 128px; margin: 18px 0 24px; border-radius: 8px; background: rgba(255,255,255,.1); animation: pulse 1.5s ease-in-out infinite; }
 .empty-state { min-height: 128px; color: var(--glass-text-secondary); font-size: 14px; }
 .today__footer { margin-top: 16px; color: var(--glass-text-muted); font-size: 11px; text-align: center; }
+
+.imports { padding-block: max(28px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-bottom)); }
+.imports__header { display: grid; grid-template-columns: 42px minmax(0,1fr); align-items: start; gap: 14px; margin-bottom: 20px; }
+.imports__header h1 { margin: 0; color: var(--glass-text-primary); font-size: clamp(28px, 5vw, 40px); font-weight: 450; line-height: 1.1; }
+.imports__header p:last-child { margin: 8px 0 0; color: var(--glass-text-secondary); font-size: 13px; }
+.imports__grid { display: grid; grid-template-columns: minmax(0,1.15fr) minmax(300px,.85fr); gap: 16px; align-items: start; }
+.imports__side { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.import-form-panel, .preview-panel, .receipt-panel { background: rgba(13,24,19,.44); }
+.import-context { display: grid; grid-template-columns: 1fr 1.5fr 1fr; gap: 10px; }
+.import-context label, .json-field { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--glass-text-muted); font-size: 11px; }
+.import-context select, .import-context input, .json-field textarea { width: 100%; border: 1px solid var(--glass-border); border-radius: 8px; outline: none; color: var(--glass-text-primary); background: rgba(255,255,255,.09); }
+.import-context select, .import-context input { min-height: 40px; padding: 0 9px; color-scheme: dark; }
+.json-field { margin-top: 16px; }
+.json-field textarea { min-height: 330px; resize: vertical; padding: 12px; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 12px; line-height: 1.5; tab-size: 2; }
+.import-context select:focus-visible, .import-context input:focus-visible, .json-field textarea:focus-visible { outline: 2px solid var(--glass-focus); outline-offset: 2px; }
+.import-hint { margin: 10px 0 16px; color: var(--glass-text-muted); font-size: 11px; line-height: 1.5; }
+.import-form-panel > .glass-panel__body > .button { align-self: flex-start; }
+.import-error { margin-bottom: 12px; }
+.preview-empty { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--glass-text-muted); text-align: center; }
+.preview-empty p { max-width: 280px; margin: 0; font-size: 12px; line-height: 1.5; }
+.import-summary { display: flex; flex-direction: column; gap: 4px; padding-bottom: 14px; border-bottom: 1px solid var(--glass-divider); }
+.import-summary strong { color: var(--glass-text-primary); font-size: 17px; font-weight: 550; }
+.import-summary span { color: var(--glass-text-secondary); font-size: 12px; }
+.import-summary small { color: var(--glass-text-muted); font-family: ui-monospace, monospace; font-size: 10px; }
+.decision-list { max-height: 330px; overflow: auto; display: flex; flex-direction: column; gap: 1px; margin: 12px 0; border-radius: 8px; background: var(--glass-divider); }
+.decision { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; padding: 10px 11px; background: rgba(17,27,22,.72); }
+.decision strong { overflow: hidden; color: var(--glass-text-secondary); font-size: 12px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.decision small { grid-column: 1 / -1; color: var(--glass-text-muted); font-size: 10px; overflow-wrap: anywhere; }
+.decision__status { justify-self: end; grid-column: 2; grid-row: 1; padding: 3px 6px; border-radius: 999px; font-size: 9px; font-weight: 650; }
+.decision__status--success { color: var(--glass-success); background: rgba(52,211,153,.14); }
+.decision__status--info { color: var(--glass-info); background: rgba(59,130,246,.14); }
+.decision__status--muted { color: var(--glass-text-muted); background: rgba(255,255,255,.07); }
+.decision__status--warning { color: var(--glass-warning); background: rgba(251,191,36,.13); }
+.decision__status--error { color: var(--glass-error); background: rgba(244,63,94,.15); }
+.decision__error { color: var(--glass-error) !important; }
+.import-warning { display: flex; align-items: flex-start; gap: 7px; margin: 0 0 12px; color: var(--glass-warning); font-size: 11px; line-height: 1.4; }
+.preview-panel .button { align-self: flex-start; }
+.receipt-title { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; color: var(--glass-text-muted); font-size: 10px; }
+.receipt-row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--glass-divider); }
+.receipt-row > div { display: flex; flex-direction: column; gap: 2px; }
+.receipt-row > div:last-child { align-items: flex-end; }
+.receipt-row strong { color: var(--glass-text-secondary); font-size: 11px; font-weight: 600; }
+.receipt-row span { color: var(--glass-text-muted); font-size: 9px; }
+.receipt-empty { margin: 10px 0 14px; color: var(--glass-text-muted); font-size: 11px; }
+.receipt-panel .button { align-self: flex-start; min-height: 34px; margin-top: 8px; font-size: 10px; }
 
 .review { width: min(100%, 880px); display: grid; grid-template-rows: auto auto auto minmax(0,1fr) auto; }
 .review__header { display: grid; grid-template-columns: 42px minmax(0,1fr) auto; align-items: center; gap: 12px; }
@@ -162,6 +207,12 @@ button { -webkit-tap-highlight-color: transparent; }
   .rating { min-height: 68px; flex-direction: column; gap: 3px; padding-inline: 3px; }
   .rating span { font-size: 10px; }
   .answer-input { font-size: 18px; }
+  .imports { padding-top: max(20px, env(safe-area-inset-top)); }
+  .imports__header { margin-top: 4px; }
+  .imports__grid { grid-template-columns: 1fr; }
+  .import-context { grid-template-columns: 1fr 1fr; }
+  .import-context label:last-child { grid-column: 1 / -1; }
+  .json-field textarea { min-height: 300px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
