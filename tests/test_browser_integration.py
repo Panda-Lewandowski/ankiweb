@@ -1,3 +1,4 @@
+import sys
 import threading
 import time
 import pytest
@@ -69,7 +70,8 @@ def test_select_all_and_suspend(live_server_browse):
             "document.getElementById('results-body').children.length>=2", timeout=6000)
         rows = page.locator(".browser-row")
         rows.nth(0).click()
-        rows.nth(1).click(modifiers=["Control"])
+        modifier = "Meta" if sys.platform == "darwin" else "Control"
+        rows.nth(1).click(modifiers=[modifier])
         page.wait_for_function(
             "document.querySelectorAll('#results-body tr.selected').length===2", timeout=6000)
         page.click("#browser-actions >> text=Suspend")

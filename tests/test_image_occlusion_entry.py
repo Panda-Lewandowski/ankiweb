@@ -91,16 +91,24 @@ def test_browser_routes_io_note_to_io_editor(client):
     io_cid, normal_cid = client.portal.call(svc.run, seed_normal)
 
     with client.websocket_connect("/ws?context=browser") as ws:
-        ws.send_json({"type": "cmd", "id": None, "ctx": "browser", "arg": f"select:{io_cid}"})
-        m = ws.receive_json()
-        while not (m["type"] == "call" and m["fn"] == "ankiwebSetDetail"):
-            m = ws.receive_json()
+        ws.send_json({"type": "cmd", "id": 1, "ctx": "browser", "arg": f"select:{io_cid}"})
+        seen = []
+        while True:
+            m = ws.receive_json(); seen.append(m)
+            if m["type"] == "call" and m["fn"] == "ankiwebSetDetail":
+                break
+            if m.get("type") == "result" and m.get("id") == 1:
+                pytest.fail(f"missing image-occlusion detail call: {seen!r}")
         assert "/image-occlusion/" in m["args"][0]
-        ws.send_json({"type": "cmd", "id": None, "ctx": "browser", "arg": f"select:{normal_cid}"})
-        m = ws.receive_json()
-        while not (m["type"] == "call" and m["fn"] == "ankiwebSetDetail"):
-            m = ws.receive_json()
-        assert "/edit?nid=" in m["args"][0]
+        ws.send_json({"type": "cmd", "id": 2, "ctx": "browser", "arg": f"select:{normal_cid}"})
+        seen = []
+        while True:
+            m = ws.receive_json(); seen.append(m)
+            if m["type"] == "call" and m["fn"] == "ankiwebEditNote":
+                break
+            if m.get("type") == "result" and m.get("id") == 2:
+                pytest.fail(f"missing standard editor detail call: {seen!r}")
+        assert m["args"] == [client.portal.call(svc.run, lambda col: col.get_card(normal_cid).nid)]
 
 
 def test_deckbrowser_has_image_occlusion_button(client):

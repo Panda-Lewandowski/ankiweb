@@ -8,7 +8,6 @@ license = "AGPL-3.0-or-later"
 license-files = ["LICENSE", "LICENSES/*", "THIRD-PARTY-NOTICES.md"]
 authors = [{ name = "tsc", email = "xxj.tan@gmail.com" }]
 classifiers = [
-    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Programming Language :: Python :: 3.12",
     "Framework :: FastAPI",
 ]
@@ -22,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "playwright>=1.44"]
+dev = ["pip>=25,<27", "pytest>=8", "pytest-asyncio>=0.23", "playwright>=1.44"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -30,3 +29,7 @@ testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 include = ["ankiweb*"]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"

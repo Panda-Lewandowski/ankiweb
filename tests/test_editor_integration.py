@@ -98,6 +98,13 @@ def test_paste_image_uploads_and_inserts(live_server_edit):
         page.on("pageerror", lambda e: print("PAGEERROR:", e))
         page.goto(f"{url}/edit?nid={nid}")
         page.wait_for_function("document.querySelector('.note-editor')!==null", timeout=8000)
+        page.wait_for_function(
+            "(function(){"
+            "var fc=document.querySelector('.field-container');"
+            "var host=fc&&fc.querySelector('.rich-text-editable');"
+            "return !!(host&&host.shadowRoot&&host.shadowRoot.querySelector('[contenteditable]'));"
+            "})()",
+            timeout=8000)
         page.evaluate("window.focusField(0)")
         # synthesize an image paste using the same dispatch technique proven in the spike:
         # construct DataTransfer with a PNG file, then dispatch ClipboardEvent with

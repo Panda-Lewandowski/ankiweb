@@ -33,10 +33,16 @@ class CollectionService:
         self._lock = asyncio.Lock()
         self._col: Collection | None = None
         self._subscribers: list = []
+        self._generation = 0
 
     @property
     def settings(self):
         return self._settings
+
+    @property
+    def generation(self) -> int:
+        """Changes whenever the owned collection handle is replaced."""
+        return self._generation
 
     async def open(self) -> None:
         path = self._settings.collection_path
@@ -48,6 +54,7 @@ class CollectionService:
 
         loop = asyncio.get_running_loop()
         self._col = await loop.run_in_executor(self._executor, _open)
+        self._generation += 1
 
     async def reopen(self) -> None:
         """Re-open the collection on the worker WITHOUT shutting it down — for ops
@@ -65,6 +72,7 @@ class CollectionService:
         loop = asyncio.get_event_loop()
         async with self._lock:
             self._col = await loop.run_in_executor(self._executor, _reopen)
+            self._generation += 1
 
     async def close(self) -> None:
         if self._col is None:
