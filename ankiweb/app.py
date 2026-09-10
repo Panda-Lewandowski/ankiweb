@@ -36,6 +36,7 @@ from ankiweb.anki_rpc import build_router as build_rpc_router
 from ankiweb.bridge.ws import build_router as build_ws_router
 from ankiweb.screens.routes import build_screen_router, register_screen_handlers
 from ankiweb.notifier import NotifierState
+from ankiweb.trainer import build_trainer_router
 from ankiweb.anki_core import AnkiAdapter
 from ankiweb.api.routes import build_router as build_language_api_router
 
@@ -121,6 +122,7 @@ def create_app(settings: Settings | None = None, service: CollectionService | No
     app.include_router(build_ws_router(lambda: app.state.hub, settings.allowed_hosts, settings.password))  # WS /ws
     app.include_router(build_screen_router(lambda: app.state.service, lambda: app.state.notifier))  # GET / + /notify
     app.include_router(build_language_api_router(lambda: app.state.anki_adapter))  # stable /api product boundary
+    app.include_router(build_trainer_router(settings.trainer_dir))       # GET /trainer/ product SPA
     app.include_router(build_sveltekit_router(settings.assets_dir))     # GET  /graphs, /_app/{path}, /favicon.ico
     app.include_router(build_media_router(lambda: app.state.service))  # GET  /{path} — LAST
 

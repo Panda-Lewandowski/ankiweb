@@ -29,6 +29,7 @@ class Settings:
     assets_dir: Path = Path(__file__).parent / "web_assets"
     shell_dir: Path = Path(__file__).parent / "shell"
     import_tmp_dir: Path = Path(__file__).parent / "_import_tmp"
+    trainer_dir: Path = Path(__file__).parent / "trainer_static"
     # Extra Host-header values accepted by the DNS-rebinding guard (beyond localhost),
     # e.g. ("192.168.1.50:8000",) or ("myhost.local",). "*" disables the check.
     allowed_hosts: tuple = ()
@@ -50,6 +51,7 @@ class Settings:
             host=os.environ.get("ANKIWEB_HOST", "127.0.0.1"),
             port=int(os.environ.get("ANKIWEB_PORT", "8000")),
             import_tmp_dir=Path(os.environ["ANKIWEB_IMPORT_TMP_DIR"]) if os.environ.get("ANKIWEB_IMPORT_TMP_DIR") else (Path(os.environ.get("ANKIWEB_COLLECTION", str(default))).parent / "import-tmp"),
+            trainer_dir=Path(os.environ["ANKIWEB_TRAINER_DIR"]) if os.environ.get("ANKIWEB_TRAINER_DIR") else Path(__file__).parent / "trainer_static",
             allowed_hosts=tuple(
                 h.strip() for h in os.environ.get("ANKIWEB_ALLOWED_HOSTS", "").split(",") if h.strip()),
             source_url=os.environ.get("ANKIWEB_SOURCE_URL", ""),
