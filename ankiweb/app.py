@@ -1,5 +1,6 @@
 from __future__ import annotations
 import html
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -42,7 +43,8 @@ from ankiweb.api.routes import build_router as build_language_api_router
 
 
 def create_app(settings: Settings | None = None, service: CollectionService | None = None,
-               hub: BridgeHub | None = None, notifier=None) -> FastAPI:
+               hub: BridgeHub | None = None, notifier=None,
+               tts_synthesizer: Callable[[str, str], bytes] | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     owns = service is None
 
@@ -121,7 +123,8 @@ def create_app(settings: Settings | None = None, service: CollectionService | No
     app.include_router(build_rpc_router(lambda: app.state.service, lambda: app.state.hub))    # POST /_anki/{method}
     app.include_router(build_ws_router(lambda: app.state.hub, settings.allowed_hosts, settings.password))  # WS /ws
     app.include_router(build_screen_router(lambda: app.state.service, lambda: app.state.notifier))  # GET / + /notify
-    app.include_router(build_language_api_router(lambda: app.state.anki_adapter))  # stable /api product boundary
+    language_api = build_language_api_router(lambda: app.state.anki_adapter, tts_synthesizer)
+    app.include_router(language_api)  # stable /api product boundary
     app.include_router(build_trainer_router(settings.trainer_dir))       # GET /trainer/ product SPA
     app.include_router(build_sveltekit_router(settings.assets_dir))     # GET  /graphs, /_app/{path}, /favicon.ico
     app.include_router(build_media_router(lambda: app.state.service))  # GET  /{path} — LAST

@@ -20,7 +20,7 @@ from ankiweb.anki_core.review_sessions import (
 )
 from ankiweb.anki_core.dto import (
     AnswerDTO, BackDTO, CardActionDTO, CardSummaryDTO, CheckDTO, HealthDTO,
-    QuestionDTO, ReviewDTO, TodayDTO,
+    QuestionDTO, ReviewDTO, TTSSpecDTO, TodayDTO,
 )
 from ankiweb.collection_service import CollectionService
 
@@ -91,7 +91,9 @@ def _audio_urls(card, question_side: bool) -> list[str]:
 
 
 def _expected(col, card, note, kind: str) -> tuple[str | None, bool]:
-    if kind in {"vocabulary_production", "personal_error", "spanish_conjugation"}:
+    if kind in {
+        "vocabulary_production", "personal_error", "spanish_conjugation", "phrase_retrieval",
+    }:
         return strip_html(_field(note, "Answer")), True
     if kind == "listening_dictation":
         return strip_html(_field(note, "Sentence")), True
@@ -108,6 +110,8 @@ def _question(card, note, kind: str, language: str) -> QuestionDTO:
         "input_required": False,
         "audio_urls": _audio_urls(card, True),
         "tts_locale": None,
+        "topic": strip_html(_field(note, "Topic")),
+        "cefr": strip_html(_field(note, "CEFR")),
     }
     if kind == "vocabulary_production":
         out.update(prompt_html=_field(note, "Prompt"), input_required=True)
@@ -133,24 +137,34 @@ def _question(card, note, kind: str, language: str) -> QuestionDTO:
             tts_locale="es_ES" if language == "spanish" else "en_US",
         )
     elif kind == "phrase_retrieval":
-        out["prompt_html"] = _field(note, "Prompt")
+        out.update(prompt_html=_field(note, "Prompt"), input_required=True)
     else:
         out["prompt_html"] = card.question()
     return out
 
 
-def _back(card, note, kind: str) -> BackDTO:
+def _expanded_cloze(text: str) -> str:
+    return re.sub(r"\{\{c\d+::(.*?)(?:::[^{}]*?)?\}\}", r"\1", text)
+
+
+def _back(card, note, kind: str, expected: str | None) -> BackDTO:
     fields_by_kind = {
         "vocabulary_production": ("Answer", "Example", "Translation"),
         "vocabulary_recognition": ("Translation", "Example"),
         "grammar_cloze": ("Text", "BackExtra"),
-        "personal_error": ("Answer", "Explanation", "OriginalError"),
+        "personal_error": ("Answer", "Explanation"),
         "spanish_conjugation": ("Answer", "Example"),
         "listening_dictation": ("Sentence", "Translation", "Note"),
         "listening_comprehension": ("Sentence", "Translation", "Note"),
         "phrase_retrieval": ("Answer", "Example"),
     }
     fields = {name: _field(note, name) for name in fields_by_kind.get(kind, ())}
+    if kind == "grammar_cloze":
+        fields = {
+            "Answer": expected or "",
+            "Text": _expanded_cloze(_field(note, "Text")),
+            "BackExtra": _field(note, "BackExtra"),
+        }
     if not fields:
         fields["answer_html"] = card.answer()
     return {"fields": fields, "audio_urls": _audio_urls(card, False)}
@@ -217,7 +231,7 @@ class AnkiAdapter:
                     "collection_generation": self._service.generation,
                     "fingerprint": _fingerprint(card),
                     "question": _question(card, note, kind, language),
-                    "back": _back(card, note, kind),
+                    "back": _back(card, note, kind, expected),
                     "expected": expected, "combining": combining,
                 }
 
@@ -286,6 +300,21 @@ class AnkiAdapter:
 
     async def card_summary(self, card_id: int) -> CardSummaryDTO:
         return await self._service.run(lambda col: self._validated_card_summary(col, card_id))
+
+    async def tts_spec(self, token: str, client_id: str) -> TTSSpecDTO:
+        """Resolve hidden listening text internally without returning it through review JSON."""
+        async with self._lock:
+            session = self._sessions.get(token)
+            self._verify_client(session, client_id)
+            if session.question.get("kind") not in {
+                "listening_dictation", "listening_comprehension",
+            }:
+                raise ReviewConflict("TTS is only available for listening cards")
+            locale = session.question.get("tts_locale")
+            text = strip_html(session.back["fields"].get("Sentence", "")).strip()
+            if not locale or not text:
+                raise ReviewConflict("listening card has no TTS source")
+            return {"text": text, "locale": locale}
 
     async def _card_action(self, card_id: int, action: str) -> CardActionDTO:
         async with self._lock:

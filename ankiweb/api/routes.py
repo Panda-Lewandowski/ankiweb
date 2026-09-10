@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from typing import Literal
 
@@ -9,10 +10,15 @@ from anki.errors import NotFoundError
 from ankiweb.anki_core.adapter import AnkiAdapter
 from ankiweb.anki_core.review_sessions import ReviewSessionError
 from ankiweb.api.schemas import AnswerRequest, CheckRequest
+from ankiweb.tts import TTSUnavailable, synthesize_tts
 
 
-def build_router(get_adapter: Callable[[], AnkiAdapter]) -> APIRouter:
+def build_router(
+    get_adapter: Callable[[], AnkiAdapter],
+    tts_synthesizer: Callable[[str, str], bytes] | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/api", tags=["language-trainer"])
+    synthesizer = tts_synthesizer or synthesize_tts
 
     async def invoke(awaitable):
         try:
@@ -60,6 +66,22 @@ def build_router(get_adapter: Callable[[], AnkiAdapter]) -> APIRouter:
         client_id: str = Header(default="anonymous", alias="X-Review-Client", max_length=128),
     ):
         return await invoke(get_adapter().answer(token, client_id, request.rating))
+
+    @router.get("/review/{token}/audio")
+    async def listening_audio(
+        token: str,
+        client_id: str = Header(default="anonymous", alias="X-Review-Client", max_length=128),
+    ):
+        spec = await invoke(get_adapter().tts_spec(token, client_id))
+        try:
+            audio = await asyncio.to_thread(synthesizer, spec["text"], spec["locale"])
+        except TTSUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return Response(
+            content=audio,
+            media_type="audio/wav",
+            headers={"Cache-Control": "private, no-store"},
+        )
 
     @router.post("/cards/{card_id}/suspend")
     async def suspend(card_id: int):

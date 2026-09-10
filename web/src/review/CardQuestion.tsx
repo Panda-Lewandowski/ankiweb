@@ -1,8 +1,9 @@
-import DOMPurify from 'dompurify';
-import { Headphones, Play, RotateCcw } from 'lucide-react';
+import { Headphones, LoaderCircle, Play, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { api } from '../api/client';
 import type { ReviewCard } from '../api/types';
 import { Button } from '../components/ui/button';
+import { QuestionContent } from './renderers/QuestionRenderers';
 
 type Props = {
   card: ReviewCard;
@@ -14,50 +15,63 @@ type Props = {
 
 export function CardQuestion({ card, value, onChange, onCheck, busy }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [playing, setPlaying] = useState(false);
-  const audio = card.question.audio_urls[0];
+  const playerRef = useRef<HTMLAudioElement | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
+  const [audioState, setAudioState] = useState<'idle' | 'loading' | 'playing' | 'error'>('idle');
+  const storedAudio = card.question.audio_urls[0];
+  const isListening = card.question.kind.startsWith('listening_');
 
   useEffect(() => {
     if (card.question.input_required) inputRef.current?.focus();
   }, [card.token, card.question.input_required]);
 
+  useEffect(() => () => {
+    playerRef.current?.pause();
+    playerRef.current = null;
+    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    objectUrlRef.current = null;
+  }, [card.token]);
+
   async function playAudio() {
-    if (!audio || playing) return;
-    const player = new Audio(audio);
-    setPlaying(true);
-    player.addEventListener('ended', () => setPlaying(false), { once: true });
-    player.addEventListener('error', () => setPlaying(false), { once: true });
-    await player.play().catch(() => setPlaying(false));
+    if (audioState === 'loading' || audioState === 'playing') return;
+    setAudioState('loading');
+    try {
+      let source = storedAudio ?? objectUrlRef.current ?? undefined;
+      if (!source) {
+        const blob = await api.audio(card.token);
+        source = URL.createObjectURL(blob);
+        objectUrlRef.current = source;
+      }
+      const player = new Audio(source);
+      playerRef.current = player;
+      player.addEventListener('ended', () => setAudioState('idle'), { once: true });
+      player.addEventListener('error', () => setAudioState('error'), { once: true });
+      setAudioState('playing');
+      await player.play();
+    } catch {
+      setAudioState('error');
+    }
   }
 
-  const safePrompt = DOMPurify.sanitize(card.question.prompt_html);
-  const isListening = card.question.kind.startsWith('listening_');
-
   return (
-    <div className="question" key={card.token}>
+    <div className={`question question--${card.question.kind}`} key={card.token}>
       {isListening ? (
         <div className="audio-block">
           <Headphones aria-hidden="true" size={22} />
-          {audio ? (
-            <Button type="button" size="icon" variant="quiet" onClick={playAudio}
-              aria-label={playing ? 'Аудио воспроизводится' : 'Прослушать аудио'} disabled={playing}>
-              {playing ? <RotateCcw className="spin" size={20} /> : <Play size={20} fill="currentColor" />}
-            </Button>
-          ) : (
-            <p className="audio-unavailable" role="status">Для этой карточки пока нет сохранённого аудио</p>
-          )}
+          <Button type="button" size="icon" variant="quiet" onClick={playAudio}
+            aria-label={audioState === 'playing' ? 'Аудио воспроизводится' : 'Прослушать аудио'}
+            disabled={audioState === 'loading' || audioState === 'playing'}>
+            {audioState === 'loading' ? <LoaderCircle className="spin" size={20} />
+              : audioState === 'playing' ? <RotateCcw className="spin" size={20} />
+                : <Play size={20} fill="currentColor" />}
+          </Button>
+          <p className={audioState === 'error' ? 'audio-unavailable audio-unavailable--error' : 'audio-unavailable'} role="status">
+            {audioState === 'error' ? 'Не удалось воспроизвести аудио' : storedAudio ? 'Прослушать ещё раз' : 'Системный голос'}
+          </p>
         </div>
       ) : null}
 
-      {safePrompt ? (
-        <div className="question__prompt" dangerouslySetInnerHTML={{ __html: safePrompt }} />
-      ) : null}
-
-      {card.question.tense || card.question.person ? (
-        <p className="question__context">
-          {[card.question.tense, card.question.person].filter(Boolean).join(' · ')}
-        </p>
-      ) : null}
+      {!isListening ? <QuestionContent question={card.question} /> : null}
 
       {card.question.instruction ? <p className="question__instruction">{card.question.instruction}</p> : null}
 
@@ -65,7 +79,7 @@ export function CardQuestion({ card, value, onChange, onCheck, busy }: Props) {
         <input
           ref={inputRef}
           className="answer-input"
-          aria-label="Ваш ответ"
+          aria-label={isListening ? 'Напечатайте услышанную фразу' : 'Ваш ответ'}
           autoComplete="off"
           spellCheck={false}
           value={value}

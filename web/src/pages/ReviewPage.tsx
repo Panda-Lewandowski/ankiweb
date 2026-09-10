@@ -98,6 +98,9 @@ export function ReviewPage({ language, initialTotal, onExit }: Props) {
   const position = Math.min(completed + (card ? 1 : 0), initialTotal);
   const progress = initialTotal ? Math.min(100, (completed / initialTotal) * 100) : 0;
   const title = useMemo(() => KIND[card?.question.kind ?? 'unknown'] ?? 'Повторение', [card]);
+  const detail = card?.question.topic
+    ? card.question.topic.replaceAll('_', ' ')
+    : card?.question.cefr ?? '';
 
   async function cardAction(action: 'suspend' | 'bury') {
     if (!card || busy) return;
@@ -122,7 +125,7 @@ export function ReviewPage({ language, initialTotal, onExit }: Props) {
         </Button>
         <div className="review__identity">
           <strong>{LANGUAGE[language]}</strong>
-          <span>{title}</span>
+          <span>{[title, detail].filter(Boolean).join(' · ')}</span>
         </div>
         <div className="review__position numeric" aria-label={`Карточка ${position} из ${initialTotal}`}>
           {position} / {initialTotal}
@@ -159,7 +162,7 @@ export function ReviewPage({ language, initialTotal, onExit }: Props) {
             {!checked ? (
               <CardQuestion card={card} value={typed} onChange={setTyped} onCheck={() => void check()} busy={busy} />
             ) : (
-              <CardAnswer result={checked} />
+              <CardAnswer result={checked} kind={card.question.kind} typedAnswer={typed} />
             )}
           </>
         ) : null}

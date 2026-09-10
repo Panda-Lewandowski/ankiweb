@@ -17,6 +17,8 @@ export type ReviewQuestion = {
   input_required: boolean;
   audio_urls: string[];
   tts_locale: string | null;
+  topic?: string;
+  cefr?: string;
   tense?: string;
   person?: string;
 };

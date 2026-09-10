@@ -20,6 +20,8 @@ class QuestionDTO(TypedDict):
     input_required: bool
     audio_urls: list[str]
     tts_locale: str | None
+    topic: NotRequired[str]
+    cefr: NotRequired[str]
     tense: NotRequired[str]
     person: NotRequired[str]
 
@@ -73,3 +75,8 @@ class CardSummaryDTO(TypedDict):
     deck: str
     queue: int
     type: int
+
+
+class TTSSpecDTO(TypedDict):
+    text: str
+    locale: str

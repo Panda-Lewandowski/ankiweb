@@ -149,6 +149,13 @@ def test_review_token_is_scoped_to_client(client):
     assert "different client" in response.json()["detail"]
 
 
+def test_tts_rejects_non_listening_card(client):
+    issued = _next(client).json()
+    response = client.get(f"/api/review/{issued['token']}/audio")
+    assert response.status_code == 409
+    assert "only available for listening" in response.json()["detail"]
+
+
 def test_check_reveals_without_scheduling_and_answer_is_exactly_once(client):
     issued = _next(client).json()
     before = client.portal.call(
@@ -346,6 +353,8 @@ def test_cloze_sibling_and_expected_answer_boundary(tmp_path: Path):
             f"/api/review/{issued['token']}/check", json={"typed_answer": "tenga"})
         assert checked.status_code == 200
         assert checked.json()["correct"] is True
+        assert checked.json()["back"]["fields"]["Answer"] == "tenga"
+        assert "{{c" not in checked.json()["back"]["fields"]["Text"]
         answered = client.post(
             f"/api/review/{issued['token']}/answer", json={"rating": "easy"}).json()
         other_id = next(cid for cid in sibling_ids if cid != issued["card_id"])
@@ -357,7 +366,13 @@ def test_cloze_sibling_and_expected_answer_boundary(tmp_path: Path):
 
 def test_listening_dictation_does_not_expose_sentence_before_check(tmp_path: Path):
     settings = Settings(collection_path=tmp_path / "listening.anki2")
-    with TestClient(create_app(settings)) as client:
+    spoken = []
+
+    def fake_tts(text, locale):
+        spoken.append((text, locale))
+        return b"RIFF-safe-audio"
+
+    with TestClient(create_app(settings, tts_synthesizer=fake_tts)) as client:
         def seed_listening(col):
             model = col.models.new("Listening Dictation")
             for field in ("Sentence", "Translation", "Note", "Language", "CEFR", "Topic", "Source"):
@@ -381,12 +396,94 @@ def test_listening_dictation_does_not_expose_sentence_before_check(tmp_path: Pat
         assert question["prompt_html"] == ""
         assert question["tts_locale"] == "es_ES"
         assert "No creo" not in str(issued)
+        audio = client.get(f"/api/review/{issued['token']}/audio")
+        assert audio.status_code == 200
+        assert audio.headers["content-type"] == "audio/wav"
+        assert audio.headers["cache-control"] == "private, no-store"
+        assert audio.content == b"RIFF-safe-audio"
+        assert spoken == [("No creo que tenga razón.", "es_ES")]
+        assert client.get(
+            f"/api/review/{issued['token']}/audio",
+            headers={"X-Review-Client": "another-client"},
+        ).status_code == 409
         checked = client.post(
             f"/api/review/{issued['token']}/check",
             json={"typed_answer": "No creo que tenga razón."},
         )
         assert checked.json()["correct"] is True
         assert checked.json()["back"]["fields"]["Sentence"] == "No creo que tenga razón."
+
+
+def test_phrase_retrieval_uses_typed_answer_without_exposing_answer(tmp_path: Path):
+    settings = Settings(collection_path=tmp_path / "phrase.anki2")
+    with TestClient(create_app(settings)) as client:
+        def seed_phrase(col):
+            model = col.models.new("Phrase Retrieval")
+            for field in ("Prompt", "Answer", "Example", "Language", "CEFR", "Topic", "Source"):
+                col.models.add_field(model, col.models.new_field(field))
+            template = col.models.new_template("Phrase")
+            template["qfmt"] = "{{Prompt}}"
+            template["afmt"] = "{{Answer}}<hr>{{Example}}"
+            col.models.add_template(model, template)
+            col.models.add_dict(model)
+            did = col.decks.id("Languages::English")
+            col.decks.id("Languages::Spanish")
+            note = col.new_note(col.models.by_name("Phrase Retrieval"))
+            note["Prompt"] = "Дай мне секунду подумать."
+            note["Answer"] = "Let me think about that for a second."
+            note["Example"] = "Let me think before I answer."
+            note["CEFR"] = "B2"
+            note["Topic"] = "fluency_chunks"
+            note.tags = ["language::english", "type::chunk"]
+            col.add_note(note, did)
+
+        client.portal.call(client.app.state.service.run, seed_phrase)
+        issued = _next(client, language="english").json()
+        assert issued["question"]["kind"] == "phrase_retrieval"
+        assert issued["question"]["input_required"] is True
+        assert issued["question"]["topic"] == "fluency_chunks"
+        assert issued["question"]["cefr"] == "B2"
+        assert "Let me think" not in str(issued)
+        checked = client.post(
+            f"/api/review/{issued['token']}/check",
+            json={"typed_answer": "Let me think about that for a second."},
+        )
+        assert checked.json()["correct"] is True
+
+
+def test_personal_error_never_returns_original_error(tmp_path: Path):
+    settings = Settings(collection_path=tmp_path / "personal-error.anki2")
+    with TestClient(create_app(settings)) as client:
+        def seed_personal_error(col):
+            model = col.models.new("Personal Error")
+            for field in (
+                "Prompt", "Answer", "Explanation", "OriginalError",
+                "Language", "CEFR", "Topic", "Source",
+            ):
+                col.models.add_field(model, col.models.new_field(field))
+            template = col.models.new_template("Error")
+            template["qfmt"] = "{{Prompt}}"
+            template["afmt"] = "{{Answer}}<hr>{{Explanation}}"
+            col.models.add_template(model, template)
+            col.models.add_dict(model)
+            did = col.decks.id("Languages::English")
+            col.decks.id("Languages::Spanish")
+            note = col.new_note(col.models.by_name("Personal Error"))
+            note["Prompt"] = "Our priorities ___ recently."
+            note["Answer"] = "have changed"
+            note["Explanation"] = "Present perfect with a plural subject."
+            note["OriginalError"] = "Our priorities has changing."
+            note.tags = ["language::english", "type::personal_error"]
+            col.add_note(note, did)
+
+        client.portal.call(client.app.state.service.run, seed_personal_error)
+        issued = _next(client, language="english").json()
+        assert "has changing" not in str(issued)
+        checked = client.post(
+            f"/api/review/{issued['token']}/check", json={"typed_answer": "have changed"})
+        assert checked.status_code == 200
+        assert "OriginalError" not in checked.json()["back"]["fields"]
+        assert "has changing" not in str(checked.json())
 
 
 def test_product_boundary_contains_no_manual_scheduler_or_sql_path():
