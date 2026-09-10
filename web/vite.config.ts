@@ -9,7 +9,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'prompt',
+      registerType: 'autoUpdate',
       manifest: {
         name: 'Language Trainer',
         short_name: 'Trainer',
@@ -22,6 +22,10 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: '/index.html',
+        // Only the product root is a SPA route. Admin/settings and all other server
+        // screens must reach FastAPI instead of being replaced by the trainer shell.
+        navigateFallbackAllowlist: [/^\/(?:index\.html)?$/],
+        cleanupOutdatedCaches: true,
         runtimeCaching: [{
           urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
           handler: 'NetworkOnly',

@@ -30,3 +30,9 @@ def test_trainer_returns_actionable_error_before_build(tmp_path: Path):
     response = TestClient(app).get("/")
     assert response.status_code == 503
     assert "npm --prefix web run build" in response.text
+
+
+def test_pwa_fallback_cannot_capture_server_settings_route():
+    config = (Path(__file__).parents[2] / "web" / "vite.config.ts").read_text()
+    assert "registerType: 'autoUpdate'" in config
+    assert "navigateFallbackAllowlist: [/^\\/(?:index\\.html)?$/]" in config
