@@ -21,7 +21,8 @@ describe('Language Trainer', () => {
       });
       if (path.includes('/check')) return Response.json({
         token: 'token-1', correct: true, diff_html: '<span>aprovechar</span>',
-        back: { fields: { Answer: 'aprovechar', Example: 'Hay que aprovechar esta oportunidad.' }, audio_urls: [] },
+        back: { fields: { Answer: 'aprovechar', Example: 'Hay que aprovechar esta oportunidad.',
+          OriginalError: 'incorrect source phrase' }, audio_urls: [] },
       });
       if (path.includes('/answer')) return Response.json({ answered: true, card_id: 1, rating: 'good', next: null });
       return new Response(null, { status: 500 });
@@ -49,6 +50,8 @@ describe('Language Trainer', () => {
     fireEvent.change(input, { target: { value: 'aprovechar' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(await screen.findByText('Hay que aprovechar esta oportunidad.')).toBeInTheDocument();
+    expect(screen.queryByText('incorrect source phrase')).not.toBeInTheDocument();
+    expect(screen.queryByText(/исходная ошибка/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /знаю/i })).toBeEnabled();
     fireEvent.keyDown(window, { key: '3' });
     expect(await screen.findByText('На сегодня всё')).toBeInTheDocument();

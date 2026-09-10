@@ -3,12 +3,13 @@ import type { CheckResponse } from '../api/types';
 
 const LABELS: Record<string, string> = {
   Answer: 'Ответ', Example: 'Пример', Translation: 'Перевод', Explanation: 'Почему',
-  OriginalError: 'Исходная ошибка', Text: 'Фраза', BackExtra: 'Пояснение',
-  Sentence: 'Фраза', Note: 'Заметка', answer_html: 'Ответ',
+  Text: 'Фраза', BackExtra: 'Пояснение', Sentence: 'Фраза', Note: 'Заметка',
+  answer_html: 'Ответ',
 };
 
 export function CardAnswer({ result }: { result: CheckResponse }) {
-  const fields = Object.entries(result.back.fields).filter(([, value]) => value.trim());
+  const fields = Object.entries(result.back.fields)
+    .filter(([name, value]) => name !== 'OriginalError' && value.trim());
   return (
     <div className="answer" aria-live="polite">
       {result.correct !== null ? (
