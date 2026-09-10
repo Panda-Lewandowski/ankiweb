@@ -1,4 +1,4 @@
-import { ArrowRight, BookOpen, CheckCircle2, LoaderCircle, RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { ArrowRight, BookOpen, CheckCircle2, LoaderCircle, RefreshCw, Settings, Wifi, WifiOff } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
 import type { Language, TodaySummary } from '../api/types';
@@ -52,9 +52,16 @@ export function TodayPage({ onStart }: { onStart: (language: Language, total: nu
           <h1>{greeting()}</h1>
           <p>Небольшая практика, которую действительно стоит запомнить.</p>
         </div>
-        <div className={connection.className} aria-label={connection.label}>
-          <connection.Icon size={14} className={loading ? 'spin' : undefined} aria-hidden="true" />
-          <span>{connection.label}</span>
+        <div className="today__actions">
+          <div className={connection.className} aria-label={connection.label}>
+            <connection.Icon size={14} className={loading ? 'spin' : undefined} aria-hidden="true" />
+            <span>{connection.label}</span>
+          </div>
+          <Button asChild size="icon" variant="quiet">
+            <a href="/settings" aria-label="Настройки Anki">
+              <Settings size={17} aria-hidden="true" />
+            </a>
+          </Button>
         </div>
       </header>
 

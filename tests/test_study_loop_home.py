@@ -43,7 +43,7 @@ def test_browse_then_open_deck(live_server):
         browser = p.chromium.launch()
         page = browser.new_page()
         page.on("pageerror", lambda e: print("PAGEERROR:", e))
-        page.goto(f"{live_server}/")
+        page.goto(f"{live_server}/settings")
         # deck browser shows the Default deck with a new-count of 3
         page.wait_for_selector("tr.deck")
         assert "Default" in page.inner_text("body")

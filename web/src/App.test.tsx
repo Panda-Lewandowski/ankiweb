@@ -38,6 +38,7 @@ describe('Language Trainer', () => {
     render(<App />);
     expect(await screen.findByText('Испанский')).toBeInTheDocument();
     expect(screen.getByText('2', { selector: '.total' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Настройки Anki' })).toHaveAttribute('href', '/settings');
     fireEvent.click(screen.getByRole('button', { name: /продолжить/i }));
     expect(await screen.findByText('воспользоваться возможностью')).toBeInTheDocument();
     expect(screen.queryByText('aprovechar')).not.toBeInTheDocument();

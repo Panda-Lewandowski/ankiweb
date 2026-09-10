@@ -30,7 +30,8 @@ from ankiweb.screens.notify import render_notify_html, config_from_form, header_
 def build_screen_router(get_service, get_notifier=None) -> APIRouter:
     router = APIRouter()
 
-    @router.get("/", response_class=HTMLResponse)
+    @router.get("/settings", response_class=HTMLResponse)
+    @router.get("/settings/", response_class=HTMLResponse)
     @router.get("/deckbrowser", response_class=HTMLResponse)
     async def deckbrowser_page():
         service = get_service()

@@ -19,8 +19,8 @@ def _seed(col):
     col.add_note(n, col.decks.id("Default"))
 
 
-def test_root_serves_deckbrowser(client):
-    r = client.get("/")
+def test_settings_serves_deckbrowser(client):
+    r = client.get("/settings")
     assert r.status_code == 200
     assert "Default" in r.text
     assert 'window.__ankiwebContext="deckbrowser"' in r.text

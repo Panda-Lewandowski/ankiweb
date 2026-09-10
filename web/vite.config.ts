@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
-  base: '/trainer/',
+  base: '/',
   plugins: [
     react(),
     tailwindcss(),
@@ -17,11 +17,11 @@ export default defineConfig({
         theme_color: '#111b16',
         background_color: '#111b16',
         display: 'standalone',
-        start_url: '/trainer/',
+        start_url: '/',
         icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
       },
       workbox: {
-        navigateFallback: '/trainer/index.html',
+        navigateFallback: '/index.html',
         runtimeCaching: [{
           urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
           handler: 'NetworkOnly',

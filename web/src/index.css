@@ -60,6 +60,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .today__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 8px; }
 .today__header h1 { margin: 0; color: var(--glass-text-primary); font-size: clamp(30px, 6vw, 42px); font-weight: 450; line-height: 1.08; }
 .today__header p:last-child { max-width: 520px; margin: 10px 0 0; color: var(--glass-text-secondary); font-size: 14px; }
+.today__actions { flex: none; display: flex; align-items: center; gap: 8px; }
 .connection-chip { flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 0 11px; border: 1px solid rgba(110,231,183,.28); border-radius: 999px; color: var(--glass-success); background: rgba(52,211,153,.14); font-size: 12px; }
 .connection-chip--loading { color: var(--glass-muted); border-color: var(--glass-border); background: rgba(255,255,255,.08); }
 .connection-chip--error { color: var(--glass-danger); border-color: rgba(248,113,113,.28); background: rgba(248,113,113,.14); }
