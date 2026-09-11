@@ -1,5 +1,9 @@
 # ankiweb
 
+> Language Trainer fork status: Phases 1–4 and production authentication are implemented.
+> Existing-collection migration is explicitly deferred; backup/deployment and production
+> exposure remain gated. See the repository-level `../../docs/FORK_PLAN.md`.
+
 > ⚠️ **Unofficial, personal, single-user project — not affiliated with Anki/Ankitects.**
 > This is an independent, community browser port of [Anki](https://apps.ankiweb.net),
 > intended to be run by **one user on their own machine**. It is **NOT** affiliated with,
@@ -85,7 +89,8 @@ conda run -n ankiweb python -m playwright install chromium
 conda run -n ankiweb python -m ankiweb
 ```
 
-This starts **two servers in one process**:
+This starts the web server and, unless disabled, the AnkiConnect compatibility server in the
+**same single process**:
 
 | Port | Serves | Default | Configure with |
 |------|--------|---------|----------------|
@@ -110,7 +115,12 @@ All settings have safe localhost defaults; override via environment variables:
 | `ANKIWEB_AC_KEY` | *(none)* | AnkiConnect `apiKey` (overrides `ankiconnect.json`). |
 | `ANKIWEB_IMPORT_TMP_DIR` | `<collection dir>/import-tmp` | Where uploaded import/image files are staged before the backend reads them. |
 | `ANKIWEB_LANG` | *(empty → English)* | UI language, an Anki locale code (e.g. `zh-CN`, `ja`, `de`, `fr`). Chosen at startup — there is no in-app switcher; changing it means changing this var and restarting. See **Language** below. |
-| `ANKIWEB_PASSWORD` | *(empty → no password)* | If set, the web UI requires this password (a `/login` page sets a session cookie). Empty = open, the default. The AnkiConnect API keeps its own `ANKIWEB_AC_KEY`. |
+| `ANKIWEB_PASSWORD_HASH` | *(empty → no auth)* | Argon2id encoded web password hash. Plaintext `ANKIWEB_PASSWORD` is rejected. |
+| `ANKIWEB_APP_SECRET` | *(empty)* | Independent random value of at least 32 characters; required with `ANKIWEB_PASSWORD_HASH`. |
+| `ANKIWEB_AUTH_DB` | `<collection dir>/language-trainer-auth.sqlite3` | Separate SQLite store for opaque sessions, rate limits, and sanitized auth audit events. |
+| `ANKIWEB_AUTH_ALLOWED_ORIGINS` | *(same Host only)* | Comma-separated additional exact browser origins accepted for authenticated requests/WebSockets. |
+| `ANKIWEB_COOKIE_SECURE` | `true` | Marks session and CSRF cookies Secure. Set `false` only for loopback HTTP development. |
+| `ANKIWEB_AC_ENABLED` | `true` | Set `false` to disable the optional AnkiConnect compatibility server. |
 | `ANKIWEB_SOURCE_URL` | *(empty)* | AGPL §13 Corresponding-Source location for this deployment, shown on the `/about` page (only relevant if you run it as a public network service). |
 
 **`ankiconnect.json`** (optional) lives next to the collection file and uses AnkiConnect's
@@ -149,19 +159,30 @@ The language is fixed at startup (it's applied before the collection is opened);
 no in-app language switcher, so to change it you set `ANKIWEB_LANG` and restart. Empty or an
 unknown code falls back to English. Accepts both `zh-CN` and `zh_CN` forms.
 
-### Password
+### Production authentication
 
-By default the web UI is open (no login) — it's a single-user, local-first app. To require a
-password, set `ANKIWEB_PASSWORD`:
+The loopback development default remains open. For authenticated use, generate an Argon2id
+hash interactively and an independent random application secret:
 
 ```bash
-ANKIWEB_PASSWORD=mysecret conda run -n ankiweb python -m ankiweb
+conda run -n ankiweb python -m ankiweb.auth hash-password
+python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
 ```
 
-Visitors then get a `/login` page; the correct password sets an httponly session cookie and
-unlocks the UI (and the `/ws` bridge). `/logout` clears it. This gates the **web app only**;
-the AnkiConnect HTTP API (port 8765) is controlled separately by `ANKIWEB_AC_KEY`. It's a
-light gate for LAN use, not a hardened auth system — serve over HTTPS if it matters.
+Set the resulting values as `ANKIWEB_PASSWORD_HASH` and `ANKIWEB_APP_SECRET`. Serve the web
+application through HTTPS so the default Secure cookies are sent. Sessions are opaque and
+revocable, have idle and absolute expiry, survive process restarts in a separate sidecar
+database, and are invalidated when the configured password hash or app secret changes.
+Cookie-authenticated mutations require a session-bound CSRF token; WebSockets validate both
+Host and Origin. Failed logins use persisted rate limiting/backoff and sanitized audit events.
+Default request access logs are disabled so review tokens embedded in API paths are not emitted.
+
+Plaintext `ANKIWEB_PASSWORD` is intentionally rejected. For local HTTP-only testing, explicitly
+set `ANKIWEB_COOKIE_SECURE=false`.
+
+When production web authentication is enabled, AnkiConnect must either be disabled with
+`ANKIWEB_AC_ENABLED=false`, or remain on loopback with a separate `ANKIWEB_AC_KEY` of at least
+32 characters. Its Swagger/OpenAPI documents require that key when configured.
 
 ### API docs (Swagger)
 

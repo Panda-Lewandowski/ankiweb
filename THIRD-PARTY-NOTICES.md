@@ -57,6 +57,15 @@ AGPL-3.0-or-later combined work while remaining GPL-3.0-or-later in origin.
 
 ---
 
+## Argon2 password hashing
+
+Production authentication uses [`argon2-cffi`](https://github.com/hynek/argon2-cffi) and
+`argon2-cffi-bindings`, both under the **MIT** license. Their locked transitive runtime
+dependencies are `cffi` (**MIT-0**) and `pycparser` (**BSD-3-Clause**). They are linked as
+Python dependencies and are not copied into the application source.
+
+---
+
 ## Corresponding Source (AGPL §13)
 
 Because ankiweb is a network service, every user interacting with it over a network is

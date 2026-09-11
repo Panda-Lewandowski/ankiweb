@@ -90,6 +90,7 @@ def render_page(
         "<!doctype html>\n"
         '<html><head><meta charset="utf-8">'
         f"<script>window.__ankiwebContext={json.dumps(context)}</script>"
+        '<script src="/shell/static/security.js"></script>'
         f"{_NIGHT_CSS}"
         f"{bar_css}"
         f"{links}"

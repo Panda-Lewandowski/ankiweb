@@ -20,6 +20,13 @@ function clientId(): string {
   return value;
 }
 
+function csrfToken(): string {
+  const prefix = 'ankiweb_csrf=';
+  const part = document.cookie.split(';').map((value) => value.trim())
+    .find((value) => value.startsWith(prefix));
+  return part ? decodeURIComponent(part.slice(prefix.length)) : '';
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
@@ -28,6 +35,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       headers: {
         'X-Review-Client': clientId(),
+        ...(init?.method && !['GET', 'HEAD', 'OPTIONS'].includes(init.method.toUpperCase())
+          ? { 'X-CSRF-Token': csrfToken() } : {}),
         ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
         ...init?.headers,
       },

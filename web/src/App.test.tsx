@@ -10,6 +10,7 @@ const today = (language: 'spanish' | 'english', total: number) => ({
 describe('Language Trainer', () => {
   beforeEach(() => {
     sessionStorage.clear();
+    document.cookie = 'ankiweb_csrf=csrf-test; path=/';
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path.includes('/api/today?language=spanish')) return Response.json(today('spanish', 2));
@@ -79,6 +80,8 @@ describe('Language Trainer', () => {
     expect(screen.queryByText('incorrect source phrase')).not.toBeInTheDocument();
     expect(screen.queryByText(/исходная ошибка/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /знаю/i })).toBeEnabled();
+    const checkCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input).includes('/check'));
+    expect(new Headers(checkCall?.[1]?.headers).get('X-CSRF-Token')).toBe('csrf-test');
     fireEvent.keyDown(window, { key: '3' });
     expect(await screen.findByText('Сессия завершена')).toBeInTheDocument();
     const answerCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input).includes('/answer'));

@@ -114,3 +114,10 @@ def test_canonical_post_body_key_still_works(keyed_client):
     r = keyed_client.post("/", json={"action": "findCards", "version": 6,
                                      "params": {"query": "deck:Default"}, "key": "topsecret"})
     assert r.json()["error"] is None
+
+
+def test_docs_require_key_when_configured(keyed_client):
+    assert keyed_client.get("/docs").status_code == 401
+    response = keyed_client.get("/openapi.json", headers={"X-API-Key": "topsecret"})
+    assert response.status_code == 200
+    assert "paths" in response.json()

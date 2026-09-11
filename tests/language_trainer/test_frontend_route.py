@@ -8,14 +8,16 @@ from ankiweb.trainer import build_trainer_router
 
 def test_trainer_serves_spa_and_static_assets(tmp_path: Path):
     (tmp_path / "assets").mkdir()
-    (tmp_path / "index.html").write_text("<main>Language Trainer</main>")
+    (tmp_path / "index.html").write_text("<html><head></head><main>Language Trainer</main></html>")
     (tmp_path / "assets" / "app.js").write_text("console.log('trainer')")
     (tmp_path / "manifest.webmanifest").write_text("{}")
     app = FastAPI()
     app.include_router(build_trainer_router(tmp_path))
     client = TestClient(app)
 
-    assert "Language Trainer" in client.get("/").text
+    root = client.get("/")
+    assert "Language Trainer" in root.text
+    assert '/shell/static/security.js' in root.text
     assert client.get("/trainer", follow_redirects=False).headers["location"] == "/"
     asset = client.get("/assets/app.js")
     assert asset.status_code == 200

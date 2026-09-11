@@ -13,6 +13,12 @@ _SPA_BRIDGE = (
     "if(typeof c==='string'&&c.indexOf('browserSearch:')===0){"
     "location.href='/browse?q='+encodeURIComponent(c.slice(14));}}catch(e){}};</script>"
 )
+_SECURITY_SCRIPT = '<script src="/shell/static/security.js"></script>'
+
+
+def secure_html_shell(contents: str) -> str:
+    """Install same-origin CSRF plumbing before an application's own scripts run."""
+    return contents.replace("<head>", "<head>" + _SECURITY_SCRIPT, 1)
 
 # subset of mediasrv _mime_for_path (mediasrv.py:171-210)
 MIME = {
@@ -76,11 +82,13 @@ def build_router(assets_dir: Path) -> APIRouter:
             if rel.startswith("sveltekit/") and "immutable" not in rel:
                 fallback = assets_dir / "sveltekit" / "index.html"
                 if fallback.is_file():
-                    return FileResponse(fallback, media_type="text/html")
+                    return HTMLResponse(secure_html_shell(fallback.read_text(encoding="utf-8")))
             return PlainTextResponse("not found", status_code=404)
 
         headers = {}
         ext = rel.rsplit(".", 1)[-1].lower() if "." in rel else ""
+        if ext == "html" and rel.startswith("sveltekit/"):
+            return HTMLResponse(secure_html_shell(target.read_text(encoding="utf-8")))
         if "immutable" in rel:
             headers["Cache-Control"] = "max-age=31536000"
         elif ext in _STATIC_ASSET_EXTS:
@@ -108,7 +116,10 @@ def build_sveltekit_router(assets_dir: Path) -> APIRouter:
 
     def _shell_with_bridge() -> str:
         html = index.read_text(encoding="utf-8")
-        return html.replace("<head>", "<head>" + _SPA_BRIDGE, 1)
+        return secure_html_shell(html).replace("<head>", "<head>" + _SPA_BRIDGE, 1)
+
+    def _shell() -> Response:
+        return HTMLResponse(secure_html_shell(index.read_text(encoding="utf-8")))
 
     @router.get("/graphs")
     def graphs_page() -> Response:
@@ -117,29 +128,29 @@ def build_sveltekit_router(assets_dir: Path) -> APIRouter:
 
     @router.get("/deck-options/{deck_id}")
     def deck_options_page(deck_id: str) -> Response:
-        return FileResponse(index, media_type="text/html")
+        return _shell()
 
     @router.get("/change-notetype/{ids:path}")
     def change_notetype_page(ids: str) -> Response:
-        return FileResponse(index, media_type="text/html")
+        return _shell()
 
     @router.get("/card-info/{ids:path}")
     def card_info_page(ids: str) -> Response:
         # SvelteKit route nodes: /card-info/[cardId] and /card-info/[cardId]/[previousId].
         # Bundle is vendored; card_stats / get_review_logs are already PASSTHROUGH RPCs.
-        return FileResponse(index, media_type="text/html")
+        return _shell()
 
     @router.get("/import-csv/{path:path}")
     def import_csv_page(path: str) -> Response:
-        return FileResponse(index, media_type="text/html")
+        return _shell()
 
     @router.get("/import-anki-package/{path:path}")
     def import_anki_package_page(path: str) -> Response:
-        return FileResponse(index, media_type="text/html")
+        return _shell()
 
     @router.get("/image-occlusion/{path:path}")
     def image_occlusion_page(path: str) -> Response:
-        return FileResponse(index, media_type="text/html")
+        return _shell()
 
     @router.get("/_app/{path:path}")
     def app_asset(path: str) -> Response:

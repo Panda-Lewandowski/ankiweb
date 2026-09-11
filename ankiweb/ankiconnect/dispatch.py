@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hmac
 from typing import Any
 from ankiweb.ankiconnect.registry import ACTIONS
 
@@ -22,7 +23,7 @@ async def dispatch_one(rt, req: dict, actions: dict = ACTIONS) -> Any:
         params = req.get("params") or {}
         # apiKey gate (requestPermission is always exempt)
         if rt.config.api_key is not None and action_name != "requestPermission":
-            if req.get("key") != rt.config.api_key:
+            if not hmac.compare_digest(str(req.get("key") or ""), rt.config.api_key):
                 raise Exception("valid api key must be provided")
         if action_name == "multi":
             result = [await dispatch_one(rt, sub, actions) for sub in (params.get("actions") or [])]

@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 
-from ankiweb.assets import _mime
+from ankiweb.assets import _mime, secure_html_shell
 
 
 def build_trainer_router(frontend_dir: Path) -> APIRouter:
@@ -32,7 +32,11 @@ def build_trainer_router(frontend_dir: Path) -> APIRouter:
         root = frontend_dir.resolve()
         index = root / "index.html"
         if index.is_file():
-            return FileResponse(index, media_type="text/html", headers={"Cache-Control": "no-cache"})
+            return Response(
+                secure_html_shell(index.read_text(encoding="utf-8")),
+                media_type="text/html",
+                headers={"Cache-Control": "no-cache"},
+            )
         return PlainTextResponse(
             "Language Trainer frontend is not built. Run: npm --prefix web run build",
             status_code=503,

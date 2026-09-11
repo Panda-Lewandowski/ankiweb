@@ -1,5 +1,6 @@
 from __future__ import annotations
 from contextlib import asynccontextmanager
+import hmac
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from ankiweb.config import Settings
@@ -46,6 +47,7 @@ def create_ankiconnect_app(
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     config = config or AnkiConnectConfig()
+    config.validate_for_production(bool(settings.password_hash))
     owns_service = service is None
     hub = hub if hub is not None else BridgeHub()
 
@@ -66,6 +68,14 @@ def create_ankiconnect_app(
                 await svc.close()
 
     app = FastAPI(title="ankiweb-ankiconnect", lifespan=lifespan, openapi_tags=_OPENAPI_TAGS)
+
+    @app.middleware("http")
+    async def protect_documentation(request: Request, call_next):
+        if config.api_key and request.url.path in {"/docs", "/redoc", "/openapi.json"}:
+            supplied = request.headers.get("x-api-key", "")
+            if not hmac.compare_digest(supplied, config.api_key):
+                return JSONResponse({"detail": "authentication required"}, status_code=401)
+        return await call_next(request)
 
     def _cors_headers(origin):
         allowed, header = allow_origin(origin, config.cors_origin_list)
