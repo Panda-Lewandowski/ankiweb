@@ -66,7 +66,8 @@ def build_router(
         request: AnswerRequest,
         client_id: str = Header(default="anonymous", alias="X-Review-Client", max_length=128),
     ):
-        return await invoke(get_adapter().answer(token, client_id, request.rating))
+        return await invoke(get_adapter().answer(
+            token, client_id, request.rating, continue_session=request.continue_session))
 
     @router.get("/review/{token}/audio")
     async def listening_audio(

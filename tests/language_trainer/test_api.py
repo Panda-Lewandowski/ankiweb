@@ -187,6 +187,22 @@ def test_check_reveals_without_scheduling_and_answer_is_exactly_once(client):
         f"/api/review/{issued['token']}/answer", json={"rating": "good"}).status_code == 409
 
 
+def test_last_session_answer_does_not_issue_another_card(client):
+    issued = _next(client).json()
+    client.post(f"/api/review/{issued['token']}/check", json={"typed_answer": "wrong"})
+    response = client.post(
+        f"/api/review/{issued['token']}/answer",
+        json={"rating": "again", "continue_session": False},
+    )
+    assert response.status_code == 200
+    assert response.json()["answered"] is True
+    assert response.json()["next"] is None
+
+    # Ending the UI session does not alter Anki's queue; a later session can ask Core again.
+    later = _next(client).json()
+    assert later["card_id"] != issued["card_id"] or later["token"] != issued["token"]
+
+
 def test_rating_requires_reveal(client):
     issued = _next(client).json()
     response = client.post(f"/api/review/{issued['token']}/answer", json={"rating": "easy"})

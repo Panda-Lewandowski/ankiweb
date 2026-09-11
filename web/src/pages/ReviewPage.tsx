@@ -66,18 +66,20 @@ export function ReviewPage({ language, initialTotal, onExit }: Props) {
     setBusy(true);
     setError('');
     try {
-      const result = await api.answer(card.token, rating);
-      setCompleted((value) => value + 1);
-      setCard(result.next);
+      const nextCompleted = completed + 1;
+      const sessionHasRoom = nextCompleted < initialTotal;
+      const result = await api.answer(card.token, rating, sessionHasRoom);
+      setCompleted(nextCompleted);
+      setCard(sessionHasRoom ? result.next : null);
       setChecked(null);
       setTyped('');
-      setFinished(result.next === null);
+      setFinished(!sessionHasRoom || result.next === null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Ответ не был засчитан.');
     } finally {
       setBusy(false);
     }
-  }, [busy, card, checked]);
+  }, [busy, card, checked, completed, initialTotal]);
 
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
@@ -108,9 +110,11 @@ export function ReviewPage({ language, initialTotal, onExit }: Props) {
     setError('');
     try {
       await api[action](card.card_id);
-      setCompleted((value) => value + 1);
+      const nextCompleted = completed + 1;
+      const sessionHasRoom = nextCompleted < initialTotal;
+      setCompleted(nextCompleted);
       setChecked(null); setTyped('');
-      const next = await api.next(language);
+      const next = sessionHasRoom ? await api.next(language) : null;
       setCard(next); setFinished(next === null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Действие не выполнено.');
@@ -142,8 +146,8 @@ export function ReviewPage({ language, initialTotal, onExit }: Props) {
         {!loading && finished ? (
           <div className="finished-state">
             <span>Готово</span>
-            <h1>На сегодня всё</h1>
-            <p>Повторения записаны в Anki.</p>
+            <h1>Сессия завершена</h1>
+            <p>{completed} из {initialTotal} ответов записаны в Anki.</p>
             <Button onClick={onExit}>Вернуться</Button>
           </div>
         ) : null}

@@ -12,6 +12,7 @@ class CheckRequest(BaseModel):
 
 class AnswerRequest(BaseModel):
     rating: Literal["again", "hard", "good", "easy"]
+    continue_session: bool = True
 
 
 class LessonContextRequest(BaseModel):

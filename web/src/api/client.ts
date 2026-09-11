@@ -68,9 +68,9 @@ export const api = {
     { method: 'POST', body: JSON.stringify({ typed_answer: typedAnswer }) },
   ),
   audio: (token: string) => requestAudio(`/api/review/${encodeURIComponent(token)}/audio`),
-  answer: (token: string, rating: Rating) => request<AnswerResponse>(
+  answer: (token: string, rating: Rating, continueSession = true) => request<AnswerResponse>(
     `/api/review/${encodeURIComponent(token)}/answer`,
-    { method: 'POST', body: JSON.stringify({ rating }) },
+    { method: 'POST', body: JSON.stringify({ rating, continue_session: continueSession }) },
   ),
   suspend: (cardId: number) => request(`/api/cards/${cardId}/suspend`, { method: 'POST' }),
   bury: (cardId: number) => request(`/api/cards/${cardId}/bury`, { method: 'POST' }),

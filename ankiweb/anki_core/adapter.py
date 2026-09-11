@@ -263,7 +263,8 @@ class AnkiAdapter:
             return {"token": token, "correct": correct, "diff_html": diff_html, "back": session.back}
 
     async def answer(self, token: str, client_id: str,
-                     rating: Literal["again", "hard", "good", "easy"]) -> AnswerDTO:
+                     rating: Literal["again", "hard", "good", "easy"],
+                     *, continue_session: bool = True) -> AnswerDTO:
         rating_map = {
             "again": CardAnswer.Rating.AGAIN, "hard": CardAnswer.Rating.HARD,
             "good": CardAnswer.Rating.GOOD, "easy": CardAnswer.Rating.EASY,
@@ -291,7 +292,8 @@ class AnkiAdapter:
                 raise
             self._sessions.consume(session)
             result = {"answered": True, "card_id": session.card_id, "rating": rating}
-        result["next"] = await self.next_review(session.language, client_id)
+        result["next"] = (
+            await self.next_review(session.language, client_id) if continue_session else None)
         return result
 
     async def suspend(self, card_id: int) -> CardActionDTO:

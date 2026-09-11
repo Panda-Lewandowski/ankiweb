@@ -80,9 +80,11 @@ describe('Language Trainer', () => {
     expect(screen.queryByText(/исходная ошибка/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /знаю/i })).toBeEnabled();
     fireEvent.keyDown(window, { key: '3' });
-    expect(await screen.findByText('На сегодня всё')).toBeInTheDocument();
+    expect(await screen.findByText('Сессия завершена')).toBeInTheDocument();
     const answerCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input).includes('/answer'));
-    expect(JSON.parse(String(answerCall?.[1]?.body))).toEqual({ rating: 'good' });
+    expect(JSON.parse(String(answerCall?.[1]?.body))).toEqual({
+      rating: 'good', continue_session: true,
+    });
   });
 
   it('does not advance when the answer request fails', async () => {
@@ -127,5 +129,47 @@ describe('Language Trainer', () => {
     expect(calls).toHaveLength(2);
     expect(JSON.parse(String(calls[0][1]?.body)).commit).toBe(false);
     expect(JSON.parse(String(calls[1][1]?.body)).commit).toBe(true);
+  });
+
+  it('ends at the planned total even when Anki can return another learning card', async () => {
+    const repeatedCard = (token: string) => ({
+      token, expires_in_seconds: 1200, language: 'spanish', card_id: 1, note_id: 2,
+      question: { kind: 'vocabulary_recognition', prompt_html: 'aprovechar', instruction: '',
+        input_required: false, audio_urls: [], tts_locale: null },
+    });
+    let answerNumber = 0;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.includes('/api/today?language=spanish')) return Response.json(today('spanish', 2));
+      if (path.includes('/api/today?language=english')) return Response.json(today('english', 0));
+      if (path.includes('/api/review/next')) return Response.json(repeatedCard('token-1'));
+      if (path.includes('/check')) return Response.json({
+        token: answerNumber ? 'token-2' : 'token-1', correct: null, diff_html: null,
+        back: { fields: { Translation: 'воспользоваться' }, audio_urls: [] },
+      });
+      if (path.includes('/answer')) {
+        answerNumber += 1;
+        return Response.json({
+          answered: true, card_id: 1, rating: 'again', next: repeatedCard(`token-${answerNumber + 1}`),
+        });
+      }
+      if (path.includes('/api/lesson-cards/receipts')) return Response.json([]);
+      throw new Error(`unexpected request: ${path} ${String(init?.method)}`);
+    });
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /продолжить/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /показать ответ/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /не вспомнила/i }));
+    expect(await screen.findByLabelText('Карточка 2 из 2')).toHaveTextContent('2 / 2');
+    fireEvent.click(screen.getByRole('button', { name: /показать ответ/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /не вспомнила/i }));
+
+    expect(await screen.findByText('Сессия завершена')).toBeInTheDocument();
+    expect(screen.getByText('2 из 2 ответов записаны в Anki.')).toBeInTheDocument();
+    const answerCalls = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/answer'));
+    expect(answerCalls).toHaveLength(2);
+    expect(JSON.parse(String(answerCalls[0][1]?.body)).continue_session).toBe(true);
+    expect(JSON.parse(String(answerCalls[1][1]?.body)).continue_session).toBe(false);
   });
 });
