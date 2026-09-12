@@ -1,5 +1,7 @@
 from __future__ import annotations
 import html
+import asyncio
+import shutil
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -48,6 +50,9 @@ def create_app(settings: Settings | None = None, service: CollectionService | No
                tts_synthesizer: Callable[[str, str], bytes] | None = None,
                auth_manager: AuthManager | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
+    if settings.production_mode:
+        from ankiweb.production import validate
+        validate(settings)
     auth_manager = auth_manager or AuthManager(settings)
     owns = service is None
 
@@ -63,22 +68,49 @@ def create_app(settings: Settings | None = None, service: CollectionService | No
         app.state.auth = auth_manager
         app.state.service = svc
         app.state.anki_adapter = AnkiAdapter(svc)
+        backup_task = None
+        if settings.production_mode:
+            from ankiweb.operations import DailyBackups
+            app.state.backups = DailyBackups(app.state.anki_adapter, settings.backups_dir)
+            backup_task = asyncio.create_task(app.state.backups.run())
         app.state.hub = h
         app.state.notifier = notifier if notifier is not None else NotifierState(
             settings.collection_path.parent / "notify.json")
-        register_screen_handlers(svc, h)
+        if not settings.production_mode:
+            register_screen_handlers(svc, h)
         try:
             yield
         finally:
+            if backup_task is not None:
+                backup_task.cancel()
+                try:
+                    await backup_task
+                except asyncio.CancelledError:
+                    pass
             if owns:
                 await svc.close()
 
-    app = FastAPI(title="ankiweb", lifespan=lifespan)
+    app = FastAPI(title="Language Trainer", lifespan=lifespan,
+                  docs_url=None if settings.production_mode else "/docs",
+                  redoc_url=None if settings.production_mode else "/redoc",
+                  openapi_url=None if settings.production_mode else "/openapi.json")
 
     async def security_guard(request: Request, call_next):
         host = request.headers.get("host", "")
         if not host_allowed(host, settings.allowed_hosts):
             return PlainTextResponse("forbidden host", status_code=403)
+        if settings.production_mode and request.method not in SAFE_METHODS:
+            if request.headers.get("origin") and request.headers["origin"] not in settings.auth_allowed_origins:
+                return PlainTextResponse("forbidden origin", status_code=403)
+            # Bound bodies before parsing (also covers chunked requests with no length).
+            size = 0
+            chunks = []
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > settings.max_request_bytes:
+                    return PlainTextResponse("request too large", status_code=413)
+                chunks.append(chunk)
+            request._body = b"".join(chunks)
         if auth_manager.enabled and request.url.path not in OPEN_PATHS:
             session = auth_manager.authenticate(request.cookies.get(COOKIE))
             if session is None:
@@ -101,6 +133,8 @@ def create_app(settings: Settings | None = None, service: CollectionService | No
         response = await call_next(request)
         response.headers.setdefault("Referrer-Policy", "same-origin")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        if settings.production_mode:
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
         if auth_manager.enabled and request.url.path.startswith(("/api/", "/_anki/")):
             response.headers.setdefault("Cache-Control", "private, no-store")
         return response
@@ -109,7 +143,17 @@ def create_app(settings: Settings | None = None, service: CollectionService | No
 
     # --- specific routes FIRST, media catch-all LAST (Starlette matches in order) ---
     @app.get("/healthz")
-    def healthz():
+    async def healthz():
+        if settings.production_mode:
+            try:
+                await asyncio.wait_for(app.state.anki_adapter.health(), timeout=5)
+                paths = (settings.collection_path.parent, settings.backups_dir)
+                if not app.state.backups.healthy() or any(
+                    shutil.disk_usage(path).free < settings.minimum_free_bytes for path in paths
+                ):
+                    raise RuntimeError("not ready")
+            except Exception:
+                return JSONResponse({"ok": False}, status_code=503)
         return {"ok": True}
 
     @app.get("/login", response_class=HTMLResponse)
@@ -165,16 +209,24 @@ def create_app(settings: Settings | None = None, service: CollectionService | No
     static_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/shell/static", StaticFiles(directory=str(static_dir), check_dir=False), name="shell")
 
-    app.include_router(build_assets_router(settings.assets_dir))       # GET  /_anki/{path}
-    app.include_router(build_rpc_router(lambda: app.state.service, lambda: app.state.hub))    # POST /_anki/{method}
-    app.include_router(build_ws_router(
-        lambda: app.state.hub, settings.allowed_hosts, lambda: app.state.auth,
-    ))  # WS /ws
-    app.include_router(build_screen_router(lambda: app.state.service, lambda: app.state.notifier))  # GET / + /notify
+    if not settings.production_mode:
+        app.include_router(build_assets_router(settings.assets_dir))
+        app.include_router(build_rpc_router(lambda: app.state.service, lambda: app.state.hub))
+        app.include_router(build_ws_router(
+            lambda: app.state.hub, settings.allowed_hosts, lambda: app.state.auth,
+        ))
+        app.include_router(build_screen_router(lambda: app.state.service, lambda: app.state.notifier))
+    else:
+        @app.get("/about", response_class=HTMLResponse)
+        def production_about():
+            return ("<h1>Language Trainer</h1><p>Unofficial; not affiliated with Anki/Ankitects.</p>"
+                    "<p>AGPL-3.0-or-later · <a href='" + html.escape(settings.source_url, quote=True)
+                    + "'>Complete Corresponding Source</a></p>")
     language_api = build_language_api_router(lambda: app.state.anki_adapter, tts_synthesizer)
     app.include_router(language_api)  # stable /api product boundary
     app.include_router(build_trainer_router(settings.trainer_dir))       # GET /trainer/ product SPA
-    app.include_router(build_sveltekit_router(settings.assets_dir))     # GET  /graphs, /_app/{path}, /favicon.ico
+    if not settings.production_mode:
+        app.include_router(build_sveltekit_router(settings.assets_dir))
     app.include_router(build_media_router(lambda: app.state.service))  # GET  /{path} — LAST
 
     return app

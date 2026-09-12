@@ -64,6 +64,10 @@ class Settings:
     login_base_delay_seconds: int = 2
     login_max_delay_seconds: int = 15 * 60
     login_attempt_window_seconds: int = 15 * 60
+    production_mode: bool = False
+    backups_dir: Path | None = None
+    minimum_free_bytes: int = 256 * 1024 * 1024
+    max_request_bytes: int = 2 * 1024 * 1024
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -74,6 +78,8 @@ class Settings:
         default = Path.home() / ".local/share/ankiweb/collection.anki2"
         collection_path = Path(os.environ.get("ANKIWEB_COLLECTION", str(default)))
         return cls(
+            production_mode=_env_bool("ANKIWEB_PRODUCTION", False),
+            backups_dir=Path(os.environ["ANKIWEB_BACKUPS"]) if os.environ.get("ANKIWEB_BACKUPS") else None,
             collection_path=collection_path,
             host=os.environ.get("ANKIWEB_HOST", "127.0.0.1"),
             port=int(os.environ.get("ANKIWEB_PORT", "8000")),

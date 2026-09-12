@@ -66,11 +66,11 @@ export function TodayPage({
           <Button size="icon" variant="quiet" onClick={onImport} aria-label="Импорт урока">
             <BookPlus size={17} aria-hidden="true" />
           </Button>
-          <Button asChild size="icon" variant="quiet">
+          {import.meta.env.VITE_HIDE_LEGACY !== 'true' ? <Button asChild size="icon" variant="quiet">
             <a href="/settings" aria-label="Настройки Anki">
               <Settings size={17} aria-hidden="true" />
             </a>
-          </Button>
+          </Button> : null}
         </div>
       </header>
 
@@ -119,7 +119,7 @@ export function TodayPage({
         })}
       </div>
 
-      <footer className="today__footer">Только нужные карточки · расписание ведёт Anki</footer>
+      <footer className="today__footer">Только нужные карточки · расписание ведёт Anki · <a href="/about">О проекте и исходный код</a></footer>
     </main>
   );
 }

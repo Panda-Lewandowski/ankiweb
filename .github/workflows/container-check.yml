@@ -1,0 +1,50 @@
+name: Private container acceptance (no deployment)
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the pinned runtime
+        run: docker build -t trainer-check .
+      - name: Run hardened container with disposable volumes
+        env:
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/tree/${{ github.sha }}
+        run: |
+          # These are synthetic CI-only credentials, never production secrets.
+          test_hash=$(docker run --rm trainer-check python -c "from ankiweb.auth import hash_password; print(hash_password('ci-only-password'))")
+          docker run -d --name trainer-check --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --tmpfs /tmp:size=128m \
+            -p 127.0.0.1:18000:8000 \
+            -v trainer-check-anki:/data/anki -v trainer-check-backups:/data/backups \
+            -e ANKIWEB_PASSWORD_HASH="$test_hash" \
+            -e ANKIWEB_APP_SECRET=ci-only-independent-secret-0123456789 \
+            -e ANKIWEB_ALLOWED_HOSTS=fixture.test \
+            -e ANKIWEB_AUTH_ALLOWED_ORIGINS=https://fixture.test \
+            -e ANKIWEB_SOURCE_URL="$SOURCE_URL" trainer-check
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18000/healthz; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18000/healthz
+          test "$(docker exec trainer-check id -u)" = 10001
+          if docker exec trainer-check touch /app/should-not-write; then exit 1; fi
+          if docker exec trainer-check python tools/maintenance.py backup \
+            --collection /data/anki/current/collection.anki2 --backups /data/backups --apply; then exit 1; fi
+          docker exec trainer-check python -c "from pathlib import Path; from ankiweb.operations import verify_bundle; p=next(Path('/data/backups').glob('daily-*/manifest.json')); verify_bundle(p.parent)"
+          docker stop --time 120 trainer-check
+          docker start trainer-check
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18000/healthz; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18000/healthz
+          docker exec trainer-check python -c "from pathlib import Path; assert len(list(Path('/data/backups').glob('daily-*/manifest.json'))) == 1"
+      - name: Remove only this job's disposable containers and volumes
+        if: always()
+        run: |
+          docker rm -f trainer-check || true
+          docker volume rm trainer-check-anki trainer-check-backups || true

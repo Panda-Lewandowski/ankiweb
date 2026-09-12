@@ -5,6 +5,7 @@ from typing import Callable, TypeVar
 import anki.lang
 from anki.collection import Collection
 from ankiweb.config import Settings
+from ankiweb.collection_lock import CollectionOwnerLock
 from google.protobuf.descriptor import FieldDescriptor
 
 T = TypeVar("T")
@@ -34,6 +35,7 @@ class CollectionService:
         self._col: Collection | None = None
         self._subscribers: list = []
         self._generation = 0
+        self._owner = CollectionOwnerLock(settings.collection_path)
 
     @property
     def settings(self):
@@ -45,6 +47,8 @@ class CollectionService:
         return self._generation
 
     async def open(self) -> None:
+        if self._col is not None:
+            raise RuntimeError("collection already open")
         path = self._settings.collection_path
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -53,7 +57,22 @@ class CollectionService:
             return Collection(str(path), server=False)
 
         loop = asyncio.get_running_loop()
-        self._col = await loop.run_in_executor(self._executor, _open)
+        self._owner.acquire()
+        opening = loop.run_in_executor(self._executor, _open)
+        try:
+            self._col = await asyncio.shield(opening)
+        except asyncio.CancelledError:
+            # A cancelled await does not stop the executor. Keep ownership until its
+            # open has finished and that handle is closed; otherwise a second owner races it.
+            try:
+                opened = await opening
+                await loop.run_in_executor(self._executor, opened.close)
+            finally:
+                self._owner.release()
+            raise
+        except BaseException:
+            self._owner.release()
+            raise
         self._generation += 1
 
     async def reopen(self) -> None:
@@ -75,11 +94,13 @@ class CollectionService:
             self._generation += 1
 
     async def close(self) -> None:
-        if self._col is None:
-            return
-        col, self._col = self._col, None
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(self._executor, lambda: col.close())
+        async with self._lock:
+            if self._col is None:
+                return
+            await loop.run_in_executor(self._executor, self._col.close)
+            self._col = None
+            self._owner.release()
         await loop.run_in_executor(None, self._executor.shutdown)
         await loop.run_in_executor(None, self._aux_executor.shutdown)
 

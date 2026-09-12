@@ -186,9 +186,10 @@ class AnkiAdapter:
             service.settings.collection_path.parent / "lesson-receipts")
 
     async def health(self) -> HealthDTO:
-        data = await self._service.run(lambda col: {
-            "anki_version": version("anki"), "scheduler_version": col.sched.version,
-        })
+        def probe(col):
+            col.note_count()  # Exercise the real backend, not only cached Python metadata.
+            return {"anki_version": version("anki"), "scheduler_version": col.sched.version}
+        data = await self._service.run(probe)
         return {"ok": True, "anki_core": data}
 
     async def migration_snapshot(self) -> dict:
@@ -196,6 +197,15 @@ class AnkiAdapter:
         from ankiweb.anki_core.migration import snapshot
         async with self._lock:
             return await self._service.run(snapshot)
+
+    async def operational_backup(self, root, *, kind="manual") -> dict:
+        from ankiweb.operations import create_bundle_locked
+        async with self._lock:
+            try:
+                return await create_bundle_locked(self, root, kind=kind)
+            finally:
+                # Full export reopens the collection; never retain pylib review leases.
+                self._sessions = ReviewSessionStore(self._sessions.ttl_seconds)
 
     async def migration_export(self, path, *, legacy=False) -> dict:
         from ankiweb.anki_core.migration import export_package

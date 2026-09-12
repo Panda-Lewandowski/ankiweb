@@ -1,8 +1,10 @@
 # ankiweb
 
-> Language Trainer fork status: Phases 1–4 and production authentication are implemented.
-> Existing-collection migration is explicitly deferred; backup/deployment and production
-> exposure remain gated. See the repository-level `../../docs/FORK_PLAN.md`.
+> Language Trainer fork: Phases 1–4, production authentication and the local Phase 6
+> full-COLPKG rehearsal are complete. Phase 7 packaging/backups/recovery pass native
+> checks; **Docker acceptance is pending**. No production deployment is authorized.
+> See [production readiness](docs/PRODUCTION_READINESS.md),
+> [migration rehearsal](docs/MIGRATION_REHEARSAL.md) and `../../docs/FORK_PLAN.md`.
 
 > ⚠️ **Unofficial, personal, single-user project — not affiliated with Anki/Ankitects.**
 > This is an independent, community browser port of [Anki](https://apps.ankiweb.net),

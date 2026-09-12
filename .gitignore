@@ -25,3 +25,9 @@ ankiweb/_import_tmp/
 
 # Local collection / media / benchmark data (never committed)
 data/
+.env
+.env.*
+!.env.example
+*.colpkg
+*.apkg
+*.owner.lock

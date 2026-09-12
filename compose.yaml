@@ -1,0 +1,35 @@
+services:
+  trainer:
+    build: .
+    image: language-trainer:local
+    init: true
+    user: "10001:10001"
+    read_only: true
+    restart: unless-stopped
+    stop_grace_period: 150s
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:size=128m,mode=1777"]
+    ports: ["127.0.0.1:8000:8000"]
+    environment:
+      ANKIWEB_PRODUCTION: "true"
+      ANKIWEB_AC_ENABLED: "false"
+      ANKIWEB_COLLECTION: ${ANKIWEB_COLLECTION_PATH:-/data/anki/current/collection.anki2}
+      ANKIWEB_BACKUPS: /data/backups
+      ANKIWEB_AUTH_DB: /data/anki/auth.sqlite3
+      ANKIWEB_PASSWORD_HASH: ${ANKIWEB_PASSWORD_HASH:?Set an Argon2id hash}
+      ANKIWEB_APP_SECRET: ${ANKIWEB_APP_SECRET:?Set an independent random secret}
+      ANKIWEB_ALLOWED_HOSTS: ${ANKIWEB_ALLOWED_HOSTS:?Set exact public hostname}
+      ANKIWEB_AUTH_ALLOWED_ORIGINS: ${ANKIWEB_AUTH_ALLOWED_ORIGINS:?Set HTTPS origin}
+      ANKIWEB_SOURCE_URL: ${ANKIWEB_SOURCE_URL:?Set exact deployed source commit URL}
+      ANKIWEB_COOKIE_SECURE: "true"
+      WEB_CONCURRENCY: "1"
+    volumes:
+      - anki:/data/anki
+      - backups:/data/backups
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+volumes:
+  anki:
+  backups:
