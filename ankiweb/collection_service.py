@@ -101,6 +101,33 @@ class CollectionService:
             await self.emit(flags, initiator)
         return result
 
+    async def import_collection_package(self, package: str, prepare: Callable[[Collection], dict]) -> dict:
+        """Offline full-package import. Validate/backup and replace under ONE owner lock.
+
+        The adapter supplies the empty-target/hash/backup policy. The lifecycle owner
+        alone invokes the official backend operation that requires a closed collection.
+        No public RPC dispatch, direct SQL, or second writable handle is involved.
+        """
+        from anki.collection import media_paths_from_col_path
+
+        def perform(col):
+            result = prepare(col)  # Must succeed before the old collection is closed.
+            if result["mode"] != "prepared":
+                raise ValueError("collection import was not prepared")
+            media_folder, media_db = media_paths_from_col_path(col.path)
+            col.close()
+            try:
+                col._backend.import_collection_package(
+                    col_path=col.path, backup_path=package,
+                    media_folder=media_folder, media_db=media_db,
+                )
+            finally:
+                col.reopen()
+                self._generation += 1
+            return {**result, "mode": "applied"}
+
+        return await self.run(perform)
+
     async def backend_raw(self, method: str, data: bytes) -> bytes:
         def fn(col):
             return getattr(col._backend, f"{method}_raw")(data)

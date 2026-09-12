@@ -8,6 +8,9 @@ import unicodedata
 from typing import Literal
 from urllib.parse import quote
 
+# Load Collection before scheduler modules (pylib has a circular import otherwise).
+from ankiweb.collection_service import CollectionService
+
 from anki.scheduler.v3 import CardAnswer
 from anki.sound import SoundOrVideoTag
 from anki.utils import strip_html
@@ -23,7 +26,6 @@ from ankiweb.anki_core.dto import (
     AnswerDTO, BackDTO, CardActionDTO, CardSummaryDTO, CheckDTO, HealthDTO,
     QuestionDTO, ReviewDTO, TTSSpecDTO, TodayDTO,
 )
-from ankiweb.collection_service import CollectionService
 from ankiweb.language.card_types import LessonBatch
 from ankiweb.language.receipts import LessonReceiptStore
 
@@ -188,6 +190,27 @@ class AnkiAdapter:
             "anki_version": version("anki"), "scheduler_version": col.sched.version,
         })
         return {"ok": True, "anki_core": data}
+
+    async def migration_snapshot(self) -> dict:
+        """Read-only offline audit, never exposed as a public route."""
+        from ankiweb.anki_core.migration import snapshot
+        async with self._lock:
+            return await self._service.run(snapshot)
+
+    async def migration_export(self, path, *, legacy=False) -> dict:
+        from ankiweb.anki_core.migration import export_package
+        async with self._lock:
+            return await self._service.run(lambda col: export_package(col, path, legacy=legacy))
+
+    async def migration_import(self, package, expected_sha256, backup, *, apply=False) -> dict:
+        from pathlib import Path
+        from ankiweb.anki_core.migration import import_empty
+        async with self._lock:
+            if apply and Path(package).suffix == ".colpkg":
+                return await self._service.import_collection_package(str(package), lambda col: import_empty(
+                    col, package, expected_sha256, backup, apply=True))
+            return await self._service.run(lambda col: import_empty(
+                col, package, expected_sha256, backup, apply=apply))
 
     async def today(self, language: Language) -> TodayDTO:
         deck_name = LANGUAGE_DECKS[language]
