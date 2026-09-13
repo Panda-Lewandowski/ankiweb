@@ -109,8 +109,10 @@ Synthetic tests additionally cover non-empty review history, FSRS memory and med
    write access, including imported media and SQLite sidecars.
 4. In Coolify, expose internal port 8000 only to its HTTPS proxy, set the real domain,
    enforce TLS and redirect HTTP to HTTPS. Do not publish AnkiConnect or raw legacy
-   routes. For host-managed Compose the example publishes **127.0.0.1 only**; connect
-   an HTTPS reverse proxy explicitly. No automatic firewall/DNS changes are made.
+   routes. The Compose file publishes no host ports. For a host-based HTTPS reverse
+   proxy outside Docker, explicitly add a loopback-only mapping such as
+   `127.0.0.1:8000:8000` after checking that the host port is available. No automatic
+   firewall/DNS changes are made.
 5. Forward Host and Origin unchanged, use request-size/time limits at the proxy too.
    Proxy-header trust is disabled: no arbitrary client can spoof trusted forwarding
    headers. Login rate limits therefore share the proxy address (acceptable for this
