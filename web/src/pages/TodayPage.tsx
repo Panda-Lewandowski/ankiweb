@@ -1,14 +1,30 @@
-import { ArrowRight, BookOpen, BookPlus, CheckCircle2, LoaderCircle, RefreshCw, Settings, Wifi, WifiOff } from 'lucide-react';
+import { ArrowRight, BookOpen, BookPlus, CheckCircle2, CircleAlert, LoaderCircle, RefreshCw, Settings } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import type { Language, TodaySummary } from '../api/types';
 import { GlassPanel } from '../components/GlassPanel';
 import { Button } from '../components/ui/button';
 
-const META: Record<Language, { name: string; code: string }> = {
-  spanish: { name: 'Испанский', code: 'ES' },
-  english: { name: 'Английский', code: 'EN' },
+const META: Record<Language, { name: string; code: string; deck: string }> = {
+  spanish: { name: 'Испанский', code: 'ES', deck: 'Languages::Spanish' },
+  english: { name: 'Английский', code: 'EN', deck: 'Languages::English' },
 };
+
+function describeLoadError(reason: unknown) {
+  // A missing deck is a collection-setup error, not a failed Anki health probe.
+  const missingDeck = reason instanceof ApiError && reason.status === 409
+    ? Object.values(META).find(({ deck }) => reason.message === `required deck does not exist: ${deck}`)
+    : undefined;
+  return missingDeck
+    ? {
+      label: 'Колода не найдена',
+      message: `В серверной коллекции не найдена колода «${missingDeck.name}» (${missingDeck.deck}).`,
+    }
+    : {
+      label: 'Не удалось загрузить план',
+      message: reason instanceof Error ? reason.message : 'Не удалось загрузить план на сегодня.',
+    };
+}
 
 function greeting() {
   const hour = new Date().getHours();
@@ -27,16 +43,16 @@ export function TodayPage({
 }) {
   const [summaries, setSummaries] = useState<Partial<Record<Language, TodaySummary>>>({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ReturnType<typeof describeLoadError> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError('');
+    setError(null);
     try {
       const [spanish, english] = await Promise.all([api.today('spanish'), api.today('english')]);
       setSummaries({ spanish, english });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Не удалось загрузить план на сегодня.');
+      setError(describeLoadError(reason));
     } finally {
       setLoading(false);
     }
@@ -44,11 +60,11 @@ export function TodayPage({
 
   useEffect(() => { void load(); }, [load]);
 
-  const connection = error
-    ? { label: 'Anki Core недоступен', className: 'connection-chip connection-chip--error', Icon: WifiOff }
+  const planStatus = error
+    ? { label: error.label, className: 'connection-chip connection-chip--error', Icon: CircleAlert }
     : loading
-      ? { label: 'Подключение к Anki Core', className: 'connection-chip connection-chip--loading', Icon: LoaderCircle }
-      : { label: 'Anki Core подключён', className: 'connection-chip', Icon: Wifi };
+      ? { label: 'Загрузка плана на сегодня', className: 'connection-chip connection-chip--loading', Icon: LoaderCircle }
+      : { label: 'План на сегодня загружен', className: 'connection-chip', Icon: CheckCircle2 };
 
   return (
     <main className="today shell-page">
@@ -59,9 +75,9 @@ export function TodayPage({
           <p>Небольшая практика, которую действительно стоит запомнить.</p>
         </div>
         <div className="today__actions">
-          <div className={connection.className} aria-label={connection.label}>
-            <connection.Icon size={14} className={loading ? 'spin' : undefined} aria-hidden="true" />
-            <span>{connection.label}</span>
+          <div className={planStatus.className} aria-label={planStatus.label}>
+            <planStatus.Icon size={14} className={loading ? 'spin' : undefined} aria-hidden="true" />
+            <span>{planStatus.label}</span>
           </div>
           <Button size="icon" variant="quiet" onClick={onImport} aria-label="Импорт урока">
             <BookPlus size={17} aria-hidden="true" />
@@ -77,7 +93,7 @@ export function TodayPage({
       <div className="notice-slot" aria-live="polite">
         {error ? (
           <div className="error-notice">
-            <span>{error}</span>
+            <span>{error.message}</span>
             <Button size="icon" variant="quiet" onClick={() => void load()} aria-label="Повторить загрузку">
               <RefreshCw size={17} />
             </Button>
